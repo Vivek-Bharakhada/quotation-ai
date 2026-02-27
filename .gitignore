@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual Environment
+backend/venv/
+venv/
+env/
+.venv/
+
+# Large index files (auto-generated, can re-index)
+backend/search_index.json
+backend/search_index_v2.json
+search_index_v2.json
+
+# Uploaded PDFs (large binary files)
+backend/uploads/*.pdf
+
+# Generated quotes history (optional - uncomment to exclude)
+# backend/quotes_history/
+
+# Generated PDFs
+backend/quotation.pdf
+backend/test_quote.pdf
+backend/test_catalog.pdf
+
+# Log files
+backend/*.log
+backend/*.txt
+backend/backend_log.txt
+backend/backend_debug.log
+backend/run_backend.err.log
+backend/run_backend.out.log
+frontend/run_frontend.err.log
+frontend/run_frontend.out.log
+
+# Node modules
+frontend/node_modules/
+node_modules/
+
+# React build output
+frontend/build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug/test output files
+backend/out.txt
+backend/debug_out.txt
+backend/debug_layout.txt
+backend/aquant_raw_dump.txt
+backend/7006_out.txt
+backend/grouping_log*.txt
+backend/test_grouping.txt
+backend/test_catalog.txt
+
+# Static quotes (generated, large)
+backend/static/quotes/

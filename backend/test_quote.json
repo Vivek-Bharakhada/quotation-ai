@@ -1,0 +1,12 @@
+{
+    "client_name": "John Doe",
+    "company": "ACME Corp",
+    "gst": "12345",
+    "address": "New York",
+    "items": [
+        {
+            "name": "SuperBook",
+            "price": "75000"
+        }
+    ]
+}

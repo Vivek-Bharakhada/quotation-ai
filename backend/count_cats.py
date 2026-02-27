@@ -1,0 +1,61 @@
+import json
+
+DASHBOARD_CATS = [
+    "STONE WASH BASINS",
+    "ARTISTIC WASH BASINS IN UNIQUE MATERIALS",
+    "CERAMIC PEDESTAL WASH BASINS",
+    "CERAMIC BASINS IN WHITE & SPECIAL FINISHES",
+    "CERAMIC SANITARY WARE IN SPECIAL FINISHES",
+    "LIMITED EDITION SANITARY WARE IN SPECIAL FINISHES",
+    "CERAMIC BASINS IN SPECIAL FINISHES",
+    "CERAMIC WASH BASINS",
+    "INTELLIGENT SMART TOILET AQUANEXX SERIES",
+    "TOILETS",
+    "FLUSH TANKS/PLATES & URINAL SENSORS IN SPECIAL FINISHES",
+    "PRESTIGE COLLECTION BASIN MIXERS",
+    "FAUCETS & SHOWERING SYSTEMS IN SPECIAL FINISHES",
+    "FAUCETS & SPOUTS IN SPECIAL FINISHES",
+    "SHOWERING SYSTEMS IN SPECIAL FINISHES",
+    "BODY JETS & BODY SHOWERS IN SPECIAL FINISHES",
+    "HAND SHOWERS IN SPECIAL FINISHES",
+    "BATH FITTINGS IN SPECIAL FINISHES",
+    "FAUCETS IN SPECIAL FINISHES",
+    "ALLIED PRODUCTS IN SPECIAL FINISHES",
+    "ACCESSORIES IN SPECIAL FINISHES",
+    "FAUCETS & SHOWERING SYSTEMS IN CHROME FINISH",
+    "FAUCETS IN CHROME FINISH",
+    "DIVERTERS & SHOWERING SYSTEMS IN CHROME & SPECIAL FINISH",
+    "CONCEALED CEILING MOUNTED SHOWERS IN CHROME FINISH",
+    "SHOWERS IN CHROME FINISH",
+    "BODY JETS & BODY SHOWERS IN CHROME FINISH",
+    "HAND SHOWERS & HEAD SHOWERS IN CHROME FINISH",
+    "ALLIED PRODUCTS IN CHROME FINISH",
+    "SS SHOWER PANELS IN MATT FINISH",
+    "KITCHEN FAUCETS IN SPECIAL & CHROME FINISH",
+    "FLOOR DRAINS IN CHROME & SPECIAL FINISHES",
+    "BATH COMPONENTS",
+    "OUR PROMISE",
+    "CARE INSTRUCTIONS"
+]
+
+path = r'backend/search_index_v2.json'
+with open(path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+items = data.get('stored_items') or data.get('items') or []
+cat_counts = {c: 0 for c in DASHBOARD_CATS}
+
+for item in items:
+    cat = item.get('category')
+    if cat in cat_counts:
+        cat_counts[cat] += 1
+    elif cat:
+        # Check if it was extracted as something else
+        print(f"Warning: Extracted Unknown Category: '{cat}'")
+
+print("\n--- CATEGORY COUNTS ---")
+for c, count in cat_counts.items():
+    if count == 0:
+        print(f"MISSING (0 products): {c}")
+    else:
+        print(f"OK ({count} products): {c}")
