@@ -5,7 +5,8 @@ import Search from './pages/search';
 import Quotation from './pages/quotation';
 import Dashboard from './pages/dashboard';
 
-const BASE = 'http://localhost:8000';
+import BASE from './api';
+
 
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');

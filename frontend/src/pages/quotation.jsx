@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './quotation.css';
 
-const BASE = 'http://localhost:8000';
+import BASE from '../api';
+
 
 export default function Quotation({ cart }) {
   const [client, setClient] = useState({

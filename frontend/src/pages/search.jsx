@@ -2,7 +2,8 @@ import { useState } from 'react';
 import axios from 'axios';
 import './search.css';
 
-const BASE = 'http://localhost:8000';
+import BASE from '../api';
+
 
 export default function Search({ cart, setCart }) {
   const [query, setQuery] = useState('');

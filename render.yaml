@@ -1,0 +1,43 @@
+services:
+  # ── Backend: FastAPI ─────────────────────────────────────────────────────────
+  - type: web
+    name: quotation-ai-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    # Optional: add these if you configure email or WhatsApp
+    # - key: SMTP_HOST
+    #   value: smtp.gmail.com
+    # - key: SMTP_PORT
+    #   value: "587"
+    # - key: SMTP_USER
+    #   sync: false   # set manually in Render dashboard
+    # - key: SMTP_PASS
+    #   sync: false
+    # - key: WHATSAPP_TOKEN
+    #   sync: false
+    # - key: WHATSAPP_PHONE_NUMBER_ID
+    #   sync: false
+    disk:
+      name: quotation-data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
+
+  # ── Frontend: React (Static Site) ────────────────────────────────────────────
+  - type: web
+    name: quotation-ai-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://quotation-ai-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

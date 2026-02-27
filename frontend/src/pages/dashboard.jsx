@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import axios from 'axios';
 import './dashboard.css';
 
-const BASE = 'http://localhost:8000';
+import BASE from '../api';
+
 
 const AQUANT_INDEX = [
   { title: 'STONE WASH BASINS' },
