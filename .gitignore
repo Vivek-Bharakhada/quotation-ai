@@ -35,6 +35,8 @@ backend/test_catalog.pdf
 # Log files
 backend/*.log
 backend/*.txt
+# But DO include requirements.txt for deployment
+!backend/requirements.txt
 backend/backend_log.txt
 backend/backend_debug.log
 backend/run_backend.err.log
