@@ -2,19 +2,39 @@ import numpy as np
 import re
 import os
 import json
+import threading
 
-# Try loading Semantic Model
+# Lazy model loading - loads in background to avoid blocking app startup
 AI_AVAILABLE = False
 model = None
+_model_lock = threading.Lock()
+_model_loading = False
 
-print("Loading Semantic Model...")
-try:
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    AI_AVAILABLE = True
-    print("Semantic Model Loaded OK.")
-except Exception as e:
-    print(f"Warning: Semantic model not available: {e}")
+def _load_model_background():
+    global model, AI_AVAILABLE, _model_loading
+    try:
+        print("Loading Semantic Model in background...")
+        from sentence_transformers import SentenceTransformer
+        m = SentenceTransformer('all-MiniLM-L6-v2')
+        with _model_lock:
+            model = m
+            AI_AVAILABLE = True
+        print("Semantic Model Loaded OK.")
+    except Exception as e:
+        print(f"Warning: Semantic model not available: {e}")
+    finally:
+        _model_loading = False
+
+def ensure_model_loaded():
+    """Trigger model loading if not already started."""
+    global _model_loading
+    if model is None and not _model_loading:
+        _model_loading = True
+        threading.Thread(target=_load_model_background, daemon=True).start()
+
+# Start loading model in background immediately on import (non-blocking)
+print("Queuing Semantic Model for background load...")
+ensure_model_loaded()
 
 # Try loading FAISS
 FAISS_AVAILABLE = False
@@ -27,6 +47,7 @@ try:
 except Exception as e:
     print(f"Warning: FAISS not available: {e}")
 
+
 # ---- Global State ----
 stored_items = []
 keyword_index = {}   # word -> [item_indices]
@@ -34,7 +55,6 @@ vector_index  = None # FAISS index
 search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
 
-import threading
 
 INDEX_FILE = "search_index_v2.json"
 
