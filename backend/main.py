@@ -251,6 +251,7 @@ async def send_quote_email(data: dict):
 async def send_quote_whatsapp(data: dict):
     raw_to = str(data.get("to_number") or "").strip()
     body = str(data.get("body") or "").strip()
+    second_message = str(data.get("second_message") or "").strip()
     pdf_url = str(data.get("pdf_url") or "").strip()
     requested_name = str(data.get("pdf_filename") or "").strip()
 
@@ -273,7 +274,7 @@ async def send_quote_whatsapp(data: dict):
     auth_headers = {"Authorization": f"Bearer {token}"}
 
     try:
-        # Send detailed text first.
+        # MESSAGE 1: Send detailed text first.
         if body:
             text_payload = {
                 "messaging_product": "whatsapp",
@@ -308,7 +309,7 @@ async def send_quote_whatsapp(data: dict):
         if not media_id:
             raise HTTPException(status_code=500, detail="WhatsApp media upload failed: no media id returned")
 
-        # Send uploaded PDF as document.
+        # MESSAGE 2: Send uploaded PDF as document.
         doc_payload = {
             "messaging_product": "whatsapp",
             "to": to_number,
@@ -327,12 +328,30 @@ async def send_quote_whatsapp(data: dict):
         )
         if not doc_res.is_success:
             raise HTTPException(status_code=500, detail=f"WhatsApp document send failed: {doc_res.text}")
+
+        # MESSAGE 3: Send second text message if provided (PDF link, notes, etc)
+        if second_message:
+            second_payload = {
+                "messaging_product": "whatsapp",
+                "to": to_number,
+                "type": "text",
+                "text": {"body": second_message[:4000]},
+            }
+            second_res = httpx.post(
+                f"{base_url}/messages",
+                headers={**auth_headers, "Content-Type": "application/json"},
+                json=second_payload,
+                timeout=45,
+            )
+            if not second_res.is_success:
+                raise HTTPException(status_code=500, detail=f"WhatsApp second message send failed: {second_res.text}")
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"WhatsApp send failed: {e}")
 
-    return {"message": "WhatsApp sent with PDF document"}
+    return {"message": "WhatsApp sent: Message 1 + PDF + Message 2"}
 
 @app.get("/list-quotes")
 def list_quotes():

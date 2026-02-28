@@ -416,6 +416,36 @@
   box-shadow: 0 14px 28px -14px rgba(37, 211, 102, 0.9);
 }
 
+.qt-wa-btn-chat {
+  background: #28A745;
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 10px 22px -14px rgba(40, 167, 69, 0.7);
+}
+
+.qt-wa-btn-chat:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -14px rgba(40, 167, 69, 0.85);
+  background: #229d4f;
+}
+
+/* WhatsApp API button with PDF badge */
+.qt-wa-api-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.qt-pdf-badge {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.25);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  margin-left: 0.3rem;
+  backdrop-filter: blur(4px);
+}
+
 /* Gmail — Google red */
 .qt-gmail-btn {
   background: #EA4335;
@@ -492,10 +522,12 @@
 
 .qt-pdf-links a:hover {
   transform: translateY(-1px);
+  box-shadow: 0 8px 16px -10px rgba(14, 116, 144, 0.4);
 }
 
 .qt-pdf-view {
-  background: rgba(148, 163, 184, 0.16);
+  background: linear-gradient(135deg, #0e7490, #06b6d4);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .qt-pdf-download {
@@ -508,6 +540,13 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
+}
+
+.qt-share-row-alt {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .qt-history {
