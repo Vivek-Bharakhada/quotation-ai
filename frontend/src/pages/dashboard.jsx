@@ -99,7 +99,7 @@ const BRAND_META = {
 function toPriceLabel(rawPrice) {
   const parsed = Number(String(rawPrice ?? '').replace(/,/g, ''));
   if (Number.isFinite(parsed) && parsed > 0) {
-    return `MRP Rs ${parsed.toLocaleString()}`;
+    return `MRP ${parsed.toLocaleString()}`;
   }
   return 'MRP on request';
 }
