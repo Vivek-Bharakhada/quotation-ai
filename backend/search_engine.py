@@ -4,6 +4,8 @@ import os
 import json
 import threading
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Lazy model loading - loads in background to avoid blocking app startup
 AI_AVAILABLE = False
 model = None
@@ -63,7 +65,7 @@ search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
 
 
-INDEX_FILE = "search_index_v2.json"
+INDEX_FILE = os.path.join(BASE_DIR, "search_index_v2.json")
 
 def save_index():
     global stored_items, keyword_index
@@ -154,6 +156,18 @@ def _code_relaxed(compact_code: str) -> str:
         .replace("l", "1")
     )
 
+def _extract_compound_code_tokens(text: str):
+    cleaned = re.sub(r'[\r\n\t]+', ' ', str(text or '').lower())
+    tokens = re.findall(r'\b(?:[a-z]{1,4}[-/]?\d{2,}|\d{3,})(?:\s+[a-z]{1,3}){1,2}\b', cleaned)
+    seen = set()
+    ordered = []
+    for tok in tokens:
+        normalized = re.sub(r'\s+', ' ', tok).strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            ordered.append(normalized)
+    return ordered
+
 def _is_code_or_model_query(query: str) -> bool:
     q = (query or "").strip().lower()
     if not q:
@@ -161,6 +175,9 @@ def _is_code_or_model_query(query: str) -> bool:
     tokens = re.findall(r'[a-z0-9/-]+', q)
     if not tokens:
         return False
+
+    if _extract_compound_code_tokens(q):
+        return True
 
     # If any token itself looks like a model/code, treat as strict code query
     for tok in tokens:
@@ -182,7 +199,84 @@ def _is_code_or_model_query(query: str) -> bool:
 
 def _extract_model_tokens(text: str):
     # Handles model patterns like K-12345IN, 9272, 2594CP, etc.
-    return re.findall(r'[a-z]{1,4}[-/]?\d{2,}[a-z0-9/-]*|\b\d{3,}\b', text.lower())
+    seen = set()
+    ordered = []
+
+    for tok in _extract_compound_code_tokens(text):
+        if tok not in seen:
+            seen.add(tok)
+            ordered.append(tok)
+
+    for tok in re.findall(r'[a-z]{1,4}[-/]?\d{2,}[a-z0-9/-]*|\b\d{3,}\b', text.lower()):
+        if tok not in seen:
+            seen.add(tok)
+            ordered.append(tok)
+
+    return ordered
+
+
+def _exact_name_variants(item):
+    name = str(item.get("name") or "").strip()
+    text = str(item.get("text") or "").strip()
+    first_line = text.split("\n")[0].strip() if text else name
+    base_line = first_line or name
+
+    variants = []
+    for raw in (name, first_line, base_line):
+        cleaned = raw.strip()
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+
+    parts = [part.strip() for part in base_line.split(" - ") if part.strip()]
+    if parts:
+        head = parts[0]
+        tail_parts = parts[1:] if (_extract_model_tokens(head) or bool(re.search(r'\d', head))) else parts
+        if tail_parts:
+            joined_dash = " - ".join(tail_parts)
+            joined_space = " ".join(tail_parts)
+            for raw in (joined_dash, joined_space):
+                cleaned = raw.strip()
+                if cleaned and cleaned not in variants:
+                    variants.append(cleaned)
+
+    return variants
+
+
+def _exact_name_score(item, query: str) -> float:
+    query = (query or "").strip()
+    if not query:
+        return 0.0
+
+    query_lower = query.lower()
+    query_compact = _compact_alnum(query)
+    query_has_digits = bool(re.search(r'\d', query_lower))
+    query_norm = _normalize(query, strip_in=query_has_digits)
+
+    best = 0.0
+    variants = _exact_name_variants(item)
+    if not variants:
+        return 0.0
+
+    for idx, variant in enumerate(variants):
+        variant_lower = variant.lower()
+        variant_compact = _compact_alnum(variant)
+        variant_norm = _normalize(variant, strip_in=query_has_digits)
+
+        if query_compact and variant_compact == query_compact:
+            score = 4200.0 - (idx * 10.0)
+            best = max(best, score)
+            continue
+
+        if query_norm and len(query_norm) >= 3 and variant_norm == query_norm:
+            score = 4100.0 - (idx * 10.0)
+            best = max(best, score)
+            continue
+
+        if variant_lower == query_lower:
+            score = 4000.0 - (idx * 10.0)
+            best = max(best, score)
+
+    return best
 
 def _item_brand(item):
     brand = (item.get("brand") or "").strip()
@@ -226,8 +320,11 @@ def add_to_index(_unused_embeddings, items):
         for model_tok in _extract_model_tokens(search_blob):
             words_to_index.add(model_tok)
             norm_tok = _normalize(model_tok, strip_in=True)
+            compact_tok = _compact_alnum(model_tok)
             if len(norm_tok) >= 3:
                 words_to_index.add(norm_tok)
+            if len(compact_tok) >= 3:
+                words_to_index.add(compact_tok)
 
         # 3. Add normalized name and first text slice for combined code-name queries
         norm_name = _normalize(name, strip_in=True)
@@ -340,11 +437,14 @@ def search(query: str, smart: bool = False, brand: str = None):
             return []
 
     # 2. FILTER & SCORE (Limited to candidates)
-    indices = candidate_indices
+    indices_list = list(candidate_indices)
     if not is_all_brand:
-        indices = [idx for idx in indices if _item_brand(stored_items[idx]) == brand_lower]
-    if not indices:
-        return []
+        # Strictly filter down to the selected brand
+        indices_list = [idx for idx in indices_list if _item_brand(stored_items[idx]) == brand_lower]
+        if not indices_list:
+            return []
+    else:
+        indices_list = [idx for idx in indices_list]
 
     # STRICT MODE: code/model queries should resolve to one most-accurate hit.
     if is_code_query:
@@ -352,7 +452,7 @@ def search(query: str, smart: bool = False, brand: str = None):
         query_is_numeric = query_code.isdigit()
         query_code_relaxed = _code_relaxed(query_code)
         strict_scores = {}
-        for idx in indices:
+        for idx in indices_list:
             item = stored_items[idx]
             name_lower = str(item.get("name") or "").lower()
             text_lower = str(item.get("text") or "").lower()
@@ -404,23 +504,40 @@ def search(query: str, smart: bool = False, brand: str = None):
 
         if strict_scores:
             ranked_strict = sorted(strict_scores.items(), key=lambda x: (-x[1], x[0]))
-            # If numeric search is ambiguous at top score, prefer "no exact match" over wrong item.
-            if query_is_numeric:
-                top_score = ranked_strict[0][1]
-                top_count = sum(1 for _, score in ranked_strict if score == top_score)
-                if top_count > 1:
-                    search_cache[cache_key] = []
-                    return []
-            results = [stored_items[ranked_strict[0][0]]]
+
+            # Find all products that share the exact top score
+            top_score = ranked_strict[0][1]
+            top_candidates = [stored_items[idx] for idx, score in ranked_strict if score == top_score]
+
+            # PERMANENT SOLUTION: We only want ONE accurate, primary product block for a given code.
+            # If the parser split things weirdly, we remove duplicate variations of the EXACT same item name.
+            unique_candidates = []
+            seen_names = set()
+            for cand in top_candidates:
+                # Use a simplified name to check for duplicates
+                cand_name = re.sub(r'[^a-zA-Z0-9]', '', cand.get("name", "").lower())
+                if cand_name not in seen_names:
+                    seen_names.add(cand_name)
+                    unique_candidates.append(cand)
+
+            # Return at most 2 distinct variants (like 2 distinct colors), but normally just 1.
+            results = unique_candidates[:2]
+            
             search_cache[cache_key] = results
             return results
-        # For code/model queries, never fall back to fuzzy text ranking.
-        search_cache[cache_key] = []
-        return []
+        
+        # PERMANENT: If the algorithm proved it's a code search ("7512 OG", "1186 RG") and we didn't
+        # hit perfectly exact above, we fall through to fuzzy but we MUST limit it to 1 result, 
+        # so it doesn't give you random basins just because they matched "OG".
+        fuzzy_max = 1
+    else:
+        # For non-code queries (like "wash basin", "olive green"), allow more results 
+        # so user can see options, but cap to a reasonable number.
+        fuzzy_max = 5
 
     scores = {}
     
-    for idx in indices:
+    for idx in indices_list:
         item = stored_items[idx]
         name_lower = str(item.get("name") or "").lower()
         text_lower = str(item.get("text") or "").lower()
@@ -482,32 +599,126 @@ def search(query: str, smart: bool = False, brand: str = None):
         except Exception: pass
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    max_results = 1 if is_code_query else 30
+    
+    # Filter out weak scores (require 400+ for code matches, 350+ for texts)
+    min_score = 400 if is_code_query else 350
+    
+    # Filter and validate items before slicing
+    filtered_items = []
+    for idx, score in ranked:
+        if score < min_score:
+            continue
+            
+        item = stored_items[idx]
+        
+        # If the user typed a specific code modifier like "OG" or "RG", drop results that clearly don't have it
+        if is_code_query and len(query_words) > 1:
+            item_text_lower = (item.get("name", "") + " " + item.get("text", "")).lower()
+            missing_modifier = False
+            for w in query_words:
+                if not w.isdigit() and len(w) <= 3:
+                    # Look for the color modifier surrounded by non-alphanumeric chars or start/end of string
+                    pattern = r'(?:^|[^a-zA-Z0-9])' + re.escape(w) + r'(?:[^a-zA-Z0-9]|$)'
+                    if not re.search(pattern, item_text_lower):
+                        missing_modifier = True
+                        break
+            if missing_modifier:
+                continue
+
+        filtered_items.append((item, score))
+        
+    max_results = fuzzy_max
 
     if is_all_brand and not is_code_query:
         # Keep "all brands" balanced, so both PDFs are visible when both have matches.
         buckets = {}
-        for idx, score in ranked:
-            b = _item_brand(stored_items[idx]) or "generic"
-            buckets.setdefault(b, []).append(idx)
+        for item, score in filtered_items:
+            b = _item_brand(item) or "generic"
+            buckets.setdefault(b, []).append(item)
 
         ordered_brands = [b for b in ("aquant", "kohler") if b in buckets]
         ordered_brands.extend([b for b in buckets.keys() if b not in ordered_brands])
 
-        mixed_indices = []
-        while len(mixed_indices) < max_results:
+        mixed_items = []
+        while len(mixed_items) < max_results:
             progressed = False
             for b in ordered_brands:
                 if buckets[b]:
-                    mixed_indices.append(buckets[b].pop(0))
+                    mixed_items.append(buckets[b].pop(0))
                     progressed = True
-                    if len(mixed_indices) >= max_results:
+                    if len(mixed_items) >= max_results:
                         break
             if not progressed:
                 break
-        results = [stored_items[idx] for idx in mixed_indices]
+        results = mixed_items
     else:
-        results = [stored_items[idx] for idx, score in ranked[:max_results]]
+        results = [item for item, score in filtered_items[:max_results]]
 
-    search_cache[cache_key] = results
-    return results
+    # Deduplicate purely by base name to avoid multiple identical images cluttering
+    unique_res = []
+    seen = set()
+    for item in results:
+        base_name = re.sub(r'[^a-zA-Z0-9]', '', item.get("name", "").lower())
+        if base_name not in seen:
+            seen.add(base_name)
+            unique_res.append(item)
+            if len(unique_res) >= max_results:
+                break
+
+    search_cache[cache_key] = unique_res
+    return unique_res
+
+
+def search_exact(query: str, smart: bool = False, brand: str = None):
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    if not stored_items:
+        load_index()
+    if not stored_items:
+        return []
+
+    brand_lower = (brand or "").strip().lower()
+    if brand_lower and brand_lower != "all":
+        target_brands = [brand_lower]
+    else:
+        target_brands = [b for b in ("aquant", "kohler") if any(_item_brand(item) == b for item in stored_items)]
+        if not target_brands:
+            target_brands = [""]
+
+    query_is_code = _is_code_or_model_query(query)
+    results = []
+
+    for target_brand in target_brands:
+        best_exact_item = None
+        best_exact_score = 0.0
+
+        if not query_is_code:
+            for item in stored_items:
+                item_brand = _item_brand(item)
+                if target_brand and item_brand != target_brand:
+                    continue
+                score = _exact_name_score(item, query)
+                if score > best_exact_score:
+                    best_exact_score = score
+                    best_exact_item = item
+
+        if best_exact_item is not None:
+            results.append(best_exact_item)
+            continue
+
+        fallback = search(query, smart=smart, brand=(target_brand or None))
+        if fallback:
+            results.append(fallback[0])
+
+    unique_res = []
+    seen = set()
+    for item in results:
+        dedupe_key = f"{_item_brand(item)}|{_compact_alnum(item.get('name', ''))}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        unique_res.append(item)
+
+    return unique_res

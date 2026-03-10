@@ -13,19 +13,6 @@ export default function Search({ cart, setCart }) {
   const [viewProduct, setViewProduct] = useState(null);
   const [failedImages, setFailedImages] = useState({});
 
-  const isCodeOrModelQuery = (value) => {
-    const q = (value || '').trim();
-    if (!q) return false;
-    const tokens = q.toLowerCase().match(/[a-z0-9/-]+/g) || [];
-    if (!tokens.length) return false;
-    if (tokens.some((tok) => /^[a-z]{1,5}[-/]?\d{2,}[a-z0-9/-]*$/i.test(tok))) return true;
-    if (tokens.length === 1 && /^\d{3,}$/.test(tokens[0])) return true;
-    if (tokens.length === 1 && /[a-z]/i.test(tokens[0]) && /\d/.test(tokens[0]) && tokens[0].length >= 4) return true;
-    const hasNumericToken = tokens.some((tok) => /^\d{3,}$/.test(tok));
-    const hasKnownBrand = tokens.some((tok) => tok === 'kohler' || tok === 'aquant');
-    return tokens.length <= 3 && hasNumericToken && hasKnownBrand;
-  };
-
   const handleSearch = async (brandOverride) => {
     const q = query.trim();
     if (!q) return;
@@ -36,13 +23,13 @@ export default function Search({ cart, setCart }) {
     const ts = Date.now();
     const brandParam = typeof brandOverride === 'string' ? brandOverride : selectedBrand;
     const brandQuery = brandParam !== 'all' ? `&brand=${brandParam}` : '';
-    const exactQuery = isCodeOrModelQuery(q) ? '&exact=true' : '';
+    const exactQuery = '&exact=true';
 
     axios
       .get(`${BASE}/search?q=${encodeURIComponent(q)}${brandQuery}${exactQuery}&smart=false&_t=${ts}`)
       .then((res) => {
         const apiResults = res.data.results || [];
-        setResults(isCodeOrModelQuery(q) ? apiResults.slice(0, 1) : apiResults);
+        setResults(apiResults);
         setLoading(false);
       })
       .catch((err) => {
@@ -85,6 +72,27 @@ export default function Search({ cart, setCart }) {
     setFailedImages((prev) => (prev[src] ? prev : { ...prev, [src]: true }));
   };
 
+  const foundBrands = new Set(results.map((item) => (item.brand || '').toLowerCase()).filter(Boolean));
+  const missingBrands = ['Aquant', 'Kohler'].filter((brand) => !foundBrands.has(brand.toLowerCase()));
+  const showSearchSummary = !loading && query && results.length > 0;
+
+  let searchSummary = '';
+  if (showSearchSummary) {
+    if (selectedBrand === 'all') {
+      if (results.length >= 2) {
+        searchSummary = 'Best exact match from both PDFs.';
+      } else {
+        const matchedBrand = results[0]?.brand || 'selected catalog';
+        const missingLabel = missingBrands.join(' + ');
+        searchSummary = missingLabel
+          ? `Exact match mila: ${matchedBrand}. ${missingLabel} me is query ka match nahi mila.`
+          : `Exact match mila: ${matchedBrand}.`;
+      }
+    } else {
+      searchSummary = `Showing best exact ${selectedBrand} match.`;
+    }
+  }
+
   return (
     <div className="sp-root">
       <header className="sp-head">
@@ -122,6 +130,8 @@ export default function Search({ cart, setCart }) {
         </button>
       </section>
 
+      {showSearchSummary && <div className="sp-search-summary">{searchSummary}</div>}
+
       {loading && (
         <div className="sp-loading">
           <div className="spinner sp-spinner" />
@@ -152,10 +162,15 @@ export default function Search({ cart, setCart }) {
               </div>
 
               <div className="sp-card-body">
+                <div className="sp-meta-row">
+                  <span className="sp-meta-pill">{(r.brand || 'Catalog').toUpperCase()}</span>
+                  {r.page ? <span className="sp-meta-pill">PAGE {r.page}</span> : null}
+                </div>
+
                 <h3 className="sp-card-title">{title}</h3>
 
                 {r.price && r.price !== '0' && (
-                  <div className="sp-price">MRP: Rs {parseInt(r.price, 10).toLocaleString()}</div>
+                  <div className="sp-price">MRP: {parseInt(r.price, 10).toLocaleString('en-IN')}</div>
                 )}
 
                 <div className="sp-actions">

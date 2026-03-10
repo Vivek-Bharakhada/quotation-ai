@@ -4,45 +4,56 @@ import './dashboard.css';
 
 import BASE from '../api';
 
+const uniqueIndexTitles = (items) => {
+  const seen = new Set();
+  return items.filter(({ title }) => {
+    const key = String(title || '').trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
 
-const AQUANT_INDEX = [
-  { title: 'STONE WASH BASINS' },
-  { title: 'ARTISTIC WASH BASINS IN UNIQUE MATERIALS' },
-  { title: 'CERAMIC PEDESTAL WASH BASINS' },
-  { title: 'CERAMIC BASINS IN WHITE & SPECIAL FINISHES' },
-  { title: 'CERAMIC SANITARY WARE IN SPECIAL FINISHES' },
-  { title: 'LIMITED EDITION SANITARY WARE IN SPECIAL FINISHES' },
-  { title: 'CERAMIC BASINS IN SPECIAL FINISHES' },
-  { title: 'CERAMIC WASH BASINS' },
-  { title: 'INTELLIGENT SMART TOILET AQUANEXX SERIES' },
-  { title: 'TOILETS' },
-  { title: 'FLUSH TANKS/PLATES & URINAL SENSORS IN SPECIAL FINISHES' },
+const AQUANT_INDEX = uniqueIndexTitles([
+  { title: 'FAUCETS & SHOWERING SYSTEMS IN SPECIAL FINISHES' },
+  { title: 'CLASSICAL CERAMICS BASINS' },
+  { title: 'CLASSICAL TOILETS' },
+  { title: 'FAUCETS & SHOWERING SYSTEMS IN SPECIAL FINISHES' },
   { title: 'PRESTIGE COLLECTION BASIN MIXERS' },
   { title: 'FAUCETS & SHOWERING SYSTEMS IN SPECIAL FINISHES' },
   { title: 'SHOWERING SYSTEMS IN SPECIAL FINISHES' },
   { title: 'FAUCETS & SPOUTS IN SPECIAL FINISHES' },
   { title: 'SHOWERING SYSTEMS IN SPECIAL FINISHES' },
-  { title: 'BODY JETS & BODY SHOWERS IN SPECIAL FINISHES' },
   { title: 'HAND SHOWERS IN SPECIAL FINISHES' },
-  { title: 'BATH FITTINGS IN SPECIAL FINISHES' },
+  { title: 'BODY JETS & BODY SHOWERS IN SPECIAL FINISHES' },
   { title: 'FAUCETS IN SPECIAL FINISHES' },
+  { title: 'BATH FITTINGS IN SPECIAL FINISHES' },
   { title: 'ALLIED PRODUCTS IN SPECIAL FINISHES' },
   { title: 'ACCESSORIES IN SPECIAL FINISHES' },
   { title: 'FAUCETS & SHOWERING SYSTEMS IN CHROME FINISH' },
-  { title: 'FAUCETS IN CHROME FINISH' },
-  { title: 'DIVERTERS & SHOWERING SYSTEMS IN CHROME & SPECIAL FINISH' },
+  { title: 'SHOWERING SYSTEMS IN CHROME FINISH' },
   { title: 'CONCEALED CEILING MOUNTED SHOWERS IN CHROME FINISH' },
-  { title: 'SHOWERS IN CHROME FINISH' },
-  { title: 'BODY JETS & BODY SHOWERS IN CHROME FINISH' },
   { title: 'HAND SHOWERS & HEAD SHOWERS IN CHROME FINISH' },
   { title: 'ALLIED PRODUCTS IN CHROME FINISH' },
   { title: 'SS SHOWER PANELS IN MATT FINISH' },
+  { title: 'SHOWER PANELS IN SPECIAL & CHROME FINISH' },
+  { title: 'FLOOR DRAINS IN STAINLESS STEEL' },
+  { title: 'FLOOR DRAINS IN SPECIAL FINISHES' },
   { title: 'KITCHEN FAUCETS IN SPECIAL & CHROME FINISH' },
-  { title: 'FLOOR DRAINS IN CHROME & SPECIAL FINISHES' },
   { title: 'BATH COMPONENTS' },
-  { title: 'OUR PROMISE' },
-  { title: 'CARE INSTRUCTIONS' },
-];
+  { title: 'STONE WASH BASINS' },
+  { title: 'ARTISTIC WASH BASINS IN UNIQUE MATERIALS' },
+  { title: 'CERAMIC SANITARY WARE IN SPECIAL FINISHES' },
+  { title: 'CERAMIC BASINS IN SPECIAL FINISHES' },
+  { title: 'CERAMIC PEDESTAL WASH BASINS' },
+  { title: 'CERAMIC BASINS IN WHITE & SPECIAL FINISHES' },
+  { title: 'CERAMIC WASH BASINS' },
+  { title: 'INTELLIGENT SMART TOILET AQUANEXX SERIES' },
+  { title: 'TOILETS' },
+  { title: 'FLUSH TANKS/PLATES & URINAL SENSORS IN SPECIAL & CHROME FINISH' },
+]);
 
 const KOHLER_INDEX = [
   { title: 'Toilets' },
@@ -74,7 +85,7 @@ const KOHLER_INDEX = [
 const BRAND_META = {
   Aquant: {
     subtitle: 'Contemporary Bathrooms',
-    title: 'Price List 2025',
+    title: 'Price List 2026',
     heroImage:
       'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=2000',
   },
@@ -88,9 +99,14 @@ const BRAND_META = {
 function toPriceLabel(rawPrice) {
   const parsed = Number(String(rawPrice ?? '').replace(/,/g, ''));
   if (Number.isFinite(parsed) && parsed > 0) {
-    return `Rs ${parsed.toLocaleString()}`;
+    return `MRP Rs ${parsed.toLocaleString()}`;
   }
   return 'MRP on request';
+}
+
+function extractCodePrefix(value) {
+  const match = String(value || '').trim().match(/^([A-Z0-9+/-]{3,}(?:\s+[A-Z0-9+]{1,4})?)/i);
+  return match ? match[1].toLowerCase() : '';
 }
 
 function buildSummary(text, name) {
@@ -98,23 +114,40 @@ function buildSummary(text, name) {
     return 'Premium sanitaryware collection';
   }
 
+  const nameLower = String(name || '').trim().toLowerCase();
+  const codePrefix = extractCodePrefix(name);
+  const seen = new Set();
   const lines = text
     .split('\n')
     .map((line) => line.trim())
     .filter(
-      (line) =>
-        line &&
-        line.length > 4 &&
-        line !== name &&
-        !line.toLowerCase().includes('mrp') &&
-        !line.toLowerCase().includes('sku code')
+      (line) => {
+        const lower = line.toLowerCase();
+        if (!line || line.length <= 4) {
+          return false;
+        }
+        if (lower === nameLower) {
+          return false;
+        }
+        if (lower.includes('mrp') || lower.includes('sku code')) {
+          return false;
+        }
+        if (codePrefix && (lower === codePrefix || lower.startsWith(`${codePrefix} -`)) && line.length <= 48) {
+          return false;
+        }
+        if (seen.has(lower)) {
+          return false;
+        }
+        seen.add(lower);
+        return true;
+      }
     );
 
   if (lines.length === 0) {
     return 'Premium sanitaryware collection';
   }
 
-  return lines.slice(0, 2).join(' | ');
+  return lines.slice(0, 3).join(' | ');
 }
 
 export default function Dashboard({ setCurrentPage, cart, setCart }) {
@@ -299,9 +332,9 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
               </header>
 
               <div className="db-index-grid">
-                {activeIndex.map((section) => (
+                {activeIndex.map((section, idx) => (
                   <button
-                    key={`${activeBrand}-${section.title}`}
+                    key={`${activeBrand}-${idx}-${section.title}`}
                     className="db-index-row"
                     onClick={() => handleCategoryClick(section.title, activeBrand)}
                   >
@@ -364,9 +397,9 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
             <aside className="db-side-index">
               <h3>{activeBrand} Index</h3>
               <div className="db-side-list">
-                {activeIndex.map((section) => (
+                {activeIndex.map((section, idx) => (
                   <button
-                    key={`${activeBrand}-side-${section.title}`}
+                    key={`${activeBrand}-side-${idx}-${section.title}`}
                     className={`db-side-item ${viewingCategory.name === section.title ? 'active' : ''}`}
                     onClick={() => handleCategoryClick(section.title, activeBrand)}
                   >

@@ -1,6 +1,6 @@
 import os
 import urllib.request
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage, HRFlowable, Flowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -25,6 +25,35 @@ def _get_logo_path(base_dir):
         return None
 
 def generate_quote(data):
+    show_bg_logo  = data.get("show_bg_logo", False)
+    made_by       = str(data.get("made_by") or "").strip()
+    made_by_phone = str(data.get("made_by_phone") or "").strip()
+    made_by_email = str(data.get("made_by_email") or "").strip()
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    logo_path = _get_logo_path(base_dir)
+
+        # ── Background watermark callback (draws on every page) ─────────
+    def draw_background(canvas, doc):
+        from reportlab.lib.pagesizes import A4
+        page_w, page_h = A4
+
+        # Background logo watermark
+        if show_bg_logo and logo_path and os.path.exists(logo_path):
+            canvas.saveState()
+            canvas.setFillAlpha(0.30)   # 30% opacity – clearly visible but still watermark
+            logo_w, logo_h = 340, 190
+            canvas.drawImage(
+                logo_path,
+                (page_w - logo_w) / 2,
+                (page_h - logo_h) / 2,
+                width=logo_w,
+                height=logo_h,
+                preserveAspectRatio=True,
+                mask='auto',
+            )
+            canvas.restoreState()
+
     doc = SimpleDocTemplate("quotation.pdf", pagesize=A4,
                             rightMargin=30, leftMargin=30,
                             topMargin=30, bottomMargin=30)
@@ -79,33 +108,78 @@ def generate_quote(data):
 
     elements = []
 
-    # ── Company Header ─────────────────────────────────────────────────────────
+    # ── Company Header: Name (LEFT)  |  Details + Brand Logos + ShreejiLogo (RIGHT) ──
     logo_path = _get_logo_path(base_dir)
-    logo_cell = ""
+    shreeji_logo_cell = ""
     if logo_path and os.path.exists(logo_path):
-        logo_cell = RLImage(logo_path, width=90, height=50, kind='proportional')
+        shreeji_logo_cell = RLImage(logo_path, width=80, height=55, kind='proportional')
 
-    company_text_cell = [
+    # Brand logo helper
+    def _brand_img(b_name, filename, w=48, h=25):
+        # We try to load generic high-quality PIL images we generated 
+        p = os.path.join(base_dir, "static", filename)
+        # If the file is 19 bytes (broken aquant) or missing, we use our generated ones
+        if b_name == 'AQUANT' and (not os.path.exists(p) or os.path.getsize(p) < 100):
+             p = os.path.join(base_dir, "static", "gen_aquant.png")
+        if b_name == 'KOHLER' and (not os.path.exists(p) or os.path.getsize(p) < 100):
+             p = os.path.join(base_dir, "static", "gen_kohler.png")
+        if b_name == 'PLUMBER' and (not os.path.exists(p) or os.path.getsize(p) < 100):
+             p = os.path.join(base_dir, "static", "gen_plumber.png")
+        
+        if os.path.exists(p) and os.path.getsize(p) > 500:
+            try:
+                return RLImage(p, width=w, height=h, kind='proportional')
+            except Exception:
+                pass
+        
+        # Last resort: text block
+        brand_style = ParagraphStyle('bstyle', parent=styles['Normal'], fontSize=7, textColor=colors.HexColor("#FFFFFF"), alignment=1)
+        # Return a colored block with text
+        t = Table([[Paragraph(f"<b>{b_name}</b>", brand_style)]], colWidths=[w], rowHeights=[h])
+        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#1e293b")), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+        return t
+
+    aquant_cell  = _brand_img('AQUANT', "brand_aquant.png",  w=52, h=28)
+    kohler_cell  = _brand_img('KOHLER', "brand_kohler.png",  w=52, h=28)
+    plumber_cell = _brand_img('PLUMBER',"brand_plumber.png", w=52, h=28)
+
+    # Contact cell (stacked text, right-aligned)
+    contact_style = ParagraphStyle(
+        'ContactRight',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor("#555555"),
+        leading=14,
+        alignment=2,   # right
+    )
+    
+    # Company info cell (Name, Tagline, Contact grouped together and right-aligned)
+    company_name_style.alignment = 2  # Right-align company name
+    company_tagline_style.alignment = 2  # Right-align tagline
+    
+    company_info_cell = [
         Paragraph(COMPANY_NAME, company_name_style),
         Paragraph(COMPANY_TAGLINE, company_tagline_style),
         Spacer(1, 4),
-        Paragraph(
-            f"Ph: {COMPANY_PHONE}  |  {COMPANY_EMAIL}",
-            company_contact_style
-        ),
+        Paragraph(f"Ph: {COMPANY_PHONE}  |  {COMPANY_EMAIL}", contact_style),
     ]
 
+    # Table: [Aquant | Kohler | Plumber | Company Info | ShreejiLogo]
     header_table = Table(
-        [[logo_cell, company_text_cell]],
-        colWidths=[100, 405],
+        [[aquant_cell, kohler_cell, plumber_cell, company_info_cell, shreeji_logo_cell]],
+        colWidths=[58, 58, 58, 275, 86],
     )
     header_table.setStyle(TableStyle([
-        ('VALIGN',       (0, 0), (-1, -1), 'MIDDLE'),
-        ('LEFTPADDING',  (0, 0), (0, 0),    0),
-        ('RIGHTPADDING', (0, 0), (0, 0),    12),
-        ('LEFTPADDING',  (1, 0), (1, 0),    10),
-        ('TOPPADDING',   (0, 0), (-1, -1),  4),
-        ('BOTTOMPADDING',(0, 0), (-1, -1),  4),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN',         (0, 0), (2,  0),  'CENTER'),    # Brands logo center
+        ('ALIGN',         (3, 0), (3,  0),  'RIGHT'),     # Company info right-aligned
+        ('ALIGN',         (4, 0), (4,  0),  'RIGHT'),     # Shreeji logo right-aligned
+        ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+        ('TOPPADDING',    (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        # Subtle divider between company info and logos
+        ('LINEBEFORE',    (3, 0), (3,  0),   0.5, colors.HexColor("#e2e8f0")),
     ]))
     elements.append(header_table)
     elements.append(HRFlowable(width="100%", thickness=1.5,
@@ -121,13 +195,45 @@ def generate_quote(data):
         parent=styles['Normal'],
         fontSize=9,
         textColor=colors.HexColor("#555555"),
-        alignment=2,  # Right
+        alignment=2,  # Right-aligned so it aligns with Shreeji Logo
         leading=14,
     )
 
+    # Setup text for Made By
+    made_by_str = ""
+    contact_details = ""
+    if made_by:
+        # We will just show "Made by: Name"
+        made_by_str = f"<br/><br/><font size=8 color='#64748b'>Made by: <b><u>{made_by}</u></b></font>"
+
+        # Combine details for the pop-up note
+        lines = [f"Name: {made_by}"]
+        if made_by_phone: lines.append(f"Phone: {made_by_phone}")
+        if made_by_email: lines.append(f"Email: {made_by_email}")
+        contact_details = chr(10).join(lines)  # newline separated
+
+    # Create a custom flowable that draws the Annotation when placed in the table
+    class AnnotationFlowable(Flowable):
+        def __init__(self, annotation_text):
+            Flowable.__init__(self)
+            self.annotation_text = annotation_text
+            self.width = 1
+            self.height = 1
+
+        def draw(self):
+            # Create a Text Annotation (PDF Pop-up Note) at current coordinate
+            if self.annotation_text:
+                self.canv.textAnnotation(self.annotation_text, Rect=(0, 0, 15, 15))
+
+    title_cell = [Paragraph("<b>QUOTATION</b>", title_style)]
+    
+    meta_cell = [Paragraph(f"<b>No:</b> {quote_number}<br/><b>Date:</b> {today_str}{made_by_str}", quote_meta_style)]
+    if contact_details:
+        # Append the invisible annotation flowable so the pop-up shows over the date cell
+        meta_cell.append(AnnotationFlowable(contact_details))
+
     title_row = Table(
-        [[Paragraph("<b>QUOTATION</b>", title_style),
-          Paragraph(f"<b>No:</b> {quote_number}<br/><b>Date:</b> {today_str}", quote_meta_style)]],
+        [[title_cell, meta_cell]],
         colWidths=[380, 125],
     )
     title_row.setStyle(TableStyle([
@@ -245,5 +351,8 @@ def generate_quote(data):
     
     t.setStyle(table_style)
     elements.append(t)
-    
-    doc.build(elements)
+    elements.append(Spacer(1, 15))
+
+
+
+    doc.build(elements, onFirstPage=draw_background, onLaterPages=draw_background)

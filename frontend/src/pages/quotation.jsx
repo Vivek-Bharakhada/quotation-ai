@@ -25,6 +25,7 @@ export default function Quotation({ cart }) {
         quantity: 1,
         discount: 0,
         image: c.image || null,
+        room: c.category || c.room || '',
         rawText: c.rawText || '',
       }))
       : [{ name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]
@@ -38,6 +39,10 @@ export default function Quotation({ cart }) {
   const [generatedPdfServerName, setGeneratedPdfServerName] = useState('');
   const [quoteNumber, setQuoteNumber] = useState('');
   const [quoteDate, setQuoteDate] = useState('');
+  const [showBgLogo, setShowBgLogo] = useState(false);
+  const [madeBy, setMadeBy] = useState('');
+  const [madeByPhone, setMadeByPhone] = useState('');
+  const [madeByEmail, setMadeByEmail] = useState('');
 
   const fetchHistory = async () => {
     try {
@@ -95,7 +100,7 @@ export default function Quotation({ cart }) {
   };
 
   const addItem = () => {
-    setItems([...items, { name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]);
+    setItems([...items, { name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]);
   };
 
   const removeItem = (index) => {
@@ -103,7 +108,7 @@ export default function Quotation({ cart }) {
     setItems(
       newItems.length > 0
         ? newItems
-        : [{ name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]
+        : [{ name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]
     );
   };
 
@@ -133,6 +138,34 @@ export default function Quotation({ cart }) {
     const gross = qty * price;
     return gross - (gross * disc) / 100;
   };
+
+  // Group items by their Room/Section field
+  const roomGroups = items.reduce((acc, item) => {
+    let room = (item.room || '').trim().toUpperCase();
+    if (!room) room = "GENERAL"; // Give it a default name if left empty
+
+    if (!acc[room]) acc[room] = 0;
+
+    const gross = getItemTotal(item); // gross after line-item discount
+
+    // Apply global discount
+    const globalDiscAmount = gross * (parseFloat(discountPercent || 0) / 100);
+    const taxable = gross - globalDiscAmount;
+
+    // Apply GST per-item to get true distributed Grand Total per room
+    const itemGstAmount = taxable * (parseFloat(gstRate || 0) / 100);
+
+    acc[room] += (taxable + itemGstAmount);
+
+    return acc;
+  }, {});
+
+  // Convert grouped Object to Array with Index for rendering (e.g., 1. KID'S BATHROOM)
+  const roomSummaries = Object.keys(roomGroups).map((roomName, idx) => ({
+    index: idx + 1,
+    name: roomName,
+    total: roomGroups[roomName]
+  }));
 
   const buildDetailedShareText = () => {
     const lines = [];
@@ -199,6 +232,10 @@ export default function Quotation({ cart }) {
         taxable_amount: taxableAmount,
         gst_amount: gstAmount,
         grand_total: grandTotal,
+        show_bg_logo: showBgLogo,
+        made_by: madeBy.trim(),
+        made_by_phone: madeByPhone.trim(),
+        made_by_email: madeByEmail.trim(),
       };
 
       const response = await axios.post(`${BASE}/generate-quote`, payload, { responseType: 'blob' });
@@ -247,7 +284,7 @@ export default function Quotation({ cart }) {
     if (!generatedPdfUrl) return;
     try {
       const whatsappNumber = getWhatsappNumber();
-      
+
       const itemLines = items.map((item, i) => {
         const qty = parseFloat(item.quantity) || 1;
         const price = parseFloat(item.price) || 0;
@@ -484,6 +521,13 @@ export default function Quotation({ cart }) {
                   onChange={(e) => handleItemChange(index, e)}
                 />
                 <input
+                  className="qt-field qt-room-field"
+                  name="room"
+                  value={item.room || ''}
+                  placeholder="Room/Section (e.g. Master Bath)"
+                  onChange={(e) => handleItemChange(index, e)}
+                />
+                <input
                   className="qt-field"
                   name="price"
                   type="number"
@@ -524,6 +568,84 @@ export default function Quotation({ cart }) {
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      {/* ── PDF Options ────────────────────────────────────────── */}
+      {roomSummaries.length > 0 && (
+        <div className="qt-room-summary-table-wrap">
+          <table className="qt-room-summary-table">
+            <thead>
+              <tr>
+                <th colSpan="2">SUMMARY OF ALL BATH ROOM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roomSummaries.map((smry, idx) => (
+                <tr key={idx}>
+                  <td>{smry.index}. {smry.name}</td>
+                  <td>Rs {smry.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                </tr>
+              ))}
+              <tr className="qt-room-summary-total">
+                <td>FINAL AMOUNT</td>
+                <td>Rs {roomSummaries.reduce((a, b) => a + b.total, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <section className="qt-pdf-options">
+        <h4>PDF Options</h4>
+        <div className="qt-pdf-opts-row">
+          <label className="qt-bg-logo-label">
+            <input
+              type="checkbox"
+              id="bg-logo-checkbox"
+              checked={showBgLogo}
+              onChange={(e) => setShowBgLogo(e.target.checked)}
+              className="qt-bg-logo-check"
+            />
+            <span className="qt-bg-logo-icon">🖼️</span>
+            Show Background Logo in PDF
+          </label>
+        </div>
+
+        <div className="qt-madeby-section">
+          <p className="qt-madeby-title">👤 Made By <span>(clickable in PDF)</span></p>
+          <div className="qt-madeby-fields">
+            <div className="qt-madeby-wrap">
+              <input
+                className="qt-field qt-madeby-input"
+                id="made-by-input"
+                type="text"
+                placeholder="Name (e.g. Vivek)"
+                value={madeBy}
+                onChange={(e) => setMadeBy(e.target.value)}
+              />
+            </div>
+            <div className="qt-madeby-wrap">
+              <input
+                className="qt-field qt-madeby-input"
+                id="made-by-phone-input"
+                type="tel"
+                placeholder="Phone (optional)"
+                value={madeByPhone}
+                onChange={(e) => setMadeByPhone(e.target.value)}
+              />
+            </div>
+            <div className="qt-madeby-wrap">
+              <input
+                className="qt-field qt-madeby-input"
+                id="made-by-email-input"
+                type="email"
+                placeholder="Email (optional)"
+                value={madeByEmail}
+                onChange={(e) => setMadeByEmail(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
       </section>
 

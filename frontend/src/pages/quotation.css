@@ -160,7 +160,7 @@
 
 .qt-item-grid {
   display: grid;
-  grid-template-columns: 72px minmax(220px, 1fr) 120px 94px 100px auto;
+  grid-template-columns: 72px minmax(180px, 1fr) 140px 100px 70px 80px auto;
   gap: 0.7rem;
   align-items: center;
   margin-bottom: 0.72rem;
@@ -235,6 +235,202 @@
   outline: none;
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+
+.qt-room-field {
+  min-width: 100px;
+}
+
+/* Room Summary Table (Premium Brand Style) */
+.qt-room-summary-table-wrap {
+  margin: 2rem auto;
+  display: flex;
+  justify-content: center;
+}
+
+.qt-room-summary-table {
+  width: 100%;
+  max-width: 500px;
+  border-collapse: collapse;
+  font-family: 'Inter', sans-serif;
+  background: white;
+  border: 1px solid #e2e8f0;
+}
+
+.qt-room-summary-table th {
+  background: #f8fafc;
+  color: #334155;
+  padding: 0.8rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: left;
+  border-bottom: 2px solid #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.qt-room-summary-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.qt-room-summary-table td:last-child {
+  text-align: right;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qt-room-summary-table tr:hover td {
+  background: #f8fafc;
+}
+
+.qt-room-summary-total {
+  background: #f1f5f9;
+}
+
+.qt-room-summary-total td {
+  font-weight: 800;
+  color: #0f172a;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  text-transform: uppercase;
+}
+
+.qt-room-summary-total td:last-child {
+  color: #be1e2d;
+  /* Matched to main brand reds if needed, or simple deep blue */
+  font-size: 1rem;
+}
+
+.dark-theme .qt-room-summary-table {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.dark-theme .qt-room-summary-table th {
+  background: #0f172a;
+  color: #cbd5e1;
+  border-bottom-color: #475569;
+}
+
+.dark-theme .qt-room-summary-table td {
+  border-bottom-color: #334155;
+  color: #94a3b8;
+}
+
+.dark-theme .qt-room-summary-table td:last-child {
+  color: #f1f5f9;
+}
+
+.dark-theme .qt-room-summary-total {
+  background: #0f172a;
+}
+
+.dark-theme .qt-room-summary-total td {
+  color: #f8fafc;
+}
+
+/* PDF Options section */
+.qt-pdf-options {
+  margin-bottom: 1.2rem;
+  border: 1px solid var(--border-color);
+  border-radius: 1rem;
+  padding: 1rem 1.1rem;
+  background: color-mix(in srgb, var(--card-bg) 88%, #ffffff 12%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.qt-pdf-options h4 {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 0.85rem 0;
+}
+
+.qt-pdf-opts-row {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+}
+
+/* Background Logo Checkbox */
+.qt-bg-logo-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.qt-bg-logo-check {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.qt-bg-logo-icon {
+  font-size: 1.1rem;
+}
+
+/* Made By section */
+.qt-madeby-section {
+  margin-top: 0.85rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--border-color);
+}
+
+.qt-madeby-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0 0 0.65rem 0;
+}
+
+.qt-madeby-title span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-left: 0.4rem;
+}
+
+.qt-madeby-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.qt-madeby-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qt-madeby-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.qt-madeby-input {
+  flex: 1 !important;
+  width: auto !important;
+}
+
+@media (max-width: 760px) {
+  .qt-madeby-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .qt-summary {

@@ -23,9 +23,17 @@ from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_IMAGES_DIR = os.path.join(STATIC_DIR, "images")
+STATIC_QUOTES_DIR = os.path.join(STATIC_DIR, "quotes")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+QUOTES_HISTORY_DIR = os.path.join(BASE_DIR, "quotes_history")
+QUOTATION_PDF_PATH = os.path.join(BASE_DIR, "quotation.pdf")
+
 # Mount static folder for images
-os.makedirs(os.path.join("static", "images"), exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+os.makedirs(STATIC_IMAGES_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,7 +61,7 @@ def index_local_catalogs(force=False):
     print("--- BACKGROUND INDEXING START ---")
     search_engine.reset_index()  # Clean all stored data and AI vectors
 
-    upload_dir = "uploads"
+    upload_dir = UPLOAD_DIR
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir)
         index_local_catalogs._running = False
@@ -104,8 +112,8 @@ def _resolve_static_pdf_path(pdf_url: str):
         raise HTTPException(status_code=400, detail="pdf_url must point to /static/*")
 
     rel_path = raw_path.lstrip("/")
-    static_root = os.path.abspath("static")
-    abs_path = os.path.abspath(os.path.normpath(rel_path))
+    static_root = os.path.abspath(STATIC_DIR)
+    abs_path = os.path.abspath(os.path.normpath(os.path.join(BASE_DIR, rel_path)))
 
     # Prevent path traversal outside static folder.
     if not abs_path.startswith(static_root):
@@ -155,7 +163,7 @@ def get_status():
 @app.post("/generate-quote")
 async def create_quote(data: dict):
     # Save quotation data for history.
-    os.makedirs("quotes_history", exist_ok=True)
+    os.makedirs(QUOTES_HISTORY_DIR, exist_ok=True)
     timestamp = int(time.time())
     client_slug = data.get("client_name", "Unknown").replace(" ", "_")
 
@@ -167,20 +175,20 @@ async def create_quote(data: dict):
     data["quote_number"] = quote_number
 
     filename = f"quote_{timestamp}_{client_slug}.json"
-    with open(os.path.join("quotes_history", filename), "w") as f:
+    with open(os.path.join(QUOTES_HISTORY_DIR, filename), "w") as f:
         json.dump(data, f)
 
     generate_quote(data)
 
     # Keep a shareable static copy of the generated PDF for email/WhatsApp sending.
-    os.makedirs(os.path.join("static", "quotes"), exist_ok=True)
+    os.makedirs(STATIC_QUOTES_DIR, exist_ok=True)
     share_pdf_name = f"quote_{timestamp}_{client_slug}.pdf"
-    share_pdf_path = os.path.join("static", "quotes", share_pdf_name)
-    shutil.copyfile("quotation.pdf", share_pdf_path)
+    share_pdf_path = os.path.join(STATIC_QUOTES_DIR, share_pdf_name)
+    shutil.copyfile(QUOTATION_PDF_PATH, share_pdf_path)
     share_pdf_url = f"/static/quotes/{share_pdf_name}"
 
     return FileResponse(
-        "quotation.pdf",
+        QUOTATION_PDF_PATH,
         media_type="application/pdf",
         filename="quotation.pdf",
         headers={
@@ -355,7 +363,7 @@ async def send_quote_whatsapp(data: dict):
 
 @app.get("/list-quotes")
 def list_quotes():
-    folder = "quotes_history"
+    folder = QUOTES_HISTORY_DIR
     if not os.path.exists(folder):
         return {"quotes": []}
     files = [f for f in os.listdir(folder) if f.endswith(".json")]
@@ -378,7 +386,7 @@ def list_quotes():
 
 @app.get("/get-quote/{id}")
 def get_quote(id: str):
-    path = os.path.join("quotes_history", id)
+    path = os.path.join(QUOTES_HISTORY_DIR, id)
     if os.path.exists(path):
         with open(path, "r") as f:
             return json.load(f)
@@ -386,7 +394,7 @@ def get_quote(id: str):
 
 @app.delete("/delete-quote/{id}")
 def delete_quote(id: str):
-    path = os.path.join("quotes_history", id)
+    path = os.path.join(QUOTES_HISTORY_DIR, id)
     if os.path.exists(path):
         os.remove(path)
         return {"message": "Deleted"}
@@ -400,9 +408,10 @@ def search_item(q: str, brand: str = None, smart: bool = False, exact: bool = Fa
     if brand == "all": brand = None
     
     print(f"DEBUG: Search request: q='{q}', brand='{brand}', smart={smart}, exact={exact}")
-    results = search_engine.search(q, smart=smart, brand=brand)
     if exact:
-        results = results[:1]
+        results = search_engine.search_exact(q, smart=smart, brand=brand)
+    else:
+        results = search_engine.search(q, smart=smart, brand=brand)
     print(f"DEBUG: Found {len(results)} results")
     return {"results": results}
 
@@ -418,7 +427,7 @@ async def add_manual_item(
     
     image_path = None
     if file:
-        dest_dir = os.path.join("static", "images", "manual")
+        dest_dir = os.path.join(STATIC_IMAGES_DIR, "manual")
         os.makedirs(dest_dir, exist_ok=True)
         img_filename = f"manual_{int(time.time())}_{file.filename}"
         dest_path = os.path.join(dest_dir, img_filename)
@@ -463,8 +472,8 @@ def ask_question(q: str):
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     try:
-        os.makedirs("uploads", exist_ok=True)
-        path = os.path.join("uploads", file.filename)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        path = os.path.join(UPLOAD_DIR, file.filename)
         content = await file.read()
         with open(path, "wb") as buffer:
             buffer.write(content)
@@ -476,7 +485,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.get("/list-uploads")
 def list_uploads():
-    upload_dir = "uploads"
+    upload_dir = UPLOAD_DIR
     if not os.path.exists(upload_dir):
         return {"files": []}
     files = [f for f in os.listdir(upload_dir) if f.lower().endswith(".pdf")]
@@ -496,7 +505,7 @@ def list_uploads():
 
 @app.delete("/delete-upload/{filename}")
 def delete_upload(filename: str):
-    path = os.path.join("uploads", filename)
+    path = os.path.join(UPLOAD_DIR, filename)
     if os.path.exists(path):
         os.remove(path)
         # Re-index in background after deletion
@@ -512,8 +521,8 @@ def rename_upload(data: dict):
     if not old_name or not new_name:
         raise HTTPException(status_code=400, detail="Missing names")
         
-    old_path = os.path.join("uploads", old_name)
-    new_path = os.path.join("uploads", new_name)
+    old_path = os.path.join(UPLOAD_DIR, old_name)
+    new_path = os.path.join(UPLOAD_DIR, new_name)
     
     if not os.path.exists(old_path):
         raise HTTPException(status_code=404, detail="Original file not found")
@@ -623,8 +632,8 @@ def browse_collection(brand: str, collection: str = None):
                     results.append(item)
             elif collection_lower in item_cat:
                 results.append(item)
-            elif collection_lower in item_text:
-                # Fallback to text matching for broader reach
+            elif not item_cat and collection_lower in item_text:
+                # Only fall back to raw text when the parser could not assign a category.
                 results.append(item)
             
         if len(results) >= 500: break # Show more for browsing
