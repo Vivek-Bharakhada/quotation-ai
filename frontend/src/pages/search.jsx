@@ -164,7 +164,6 @@ export default function Search({ cart, setCart }) {
               <div className="sp-card-body">
                 <div className="sp-meta-row">
                   <span className="sp-meta-pill">{(r.brand || 'Catalog').toUpperCase()}</span>
-                  {r.page ? <span className="sp-meta-pill">PAGE {r.page}</span> : null}
                 </div>
 
                 <h3 className="sp-card-title">{title}</h3>
