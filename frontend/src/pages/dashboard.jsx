@@ -155,6 +155,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
   const [viewingCategory, setViewingCategory] = useState(null);
   const [categoryProducts, setCategoryProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(40);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [failedImages, setFailedImages] = useState({});
 
@@ -198,6 +199,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
     setActiveBrand(brand);
     setViewingCategory({ name: category, brand });
     setLoadingProducts(true);
+    setVisibleCount(40);
 
     try {
       const res = await axios.get(`${BASE}/catalog/browse`, {
@@ -426,22 +428,23 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                   <p>Fetching products...</p>
                 </div>
               ) : categoryProducts.length > 0 ? (
-                <div className="db-products-grid">
-                  {categoryProducts.map((item, idx) => {
-                    const alreadyAdded = isInCart(item);
-                    const imageCandidates = (item.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
-                    const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
-                    const hasImage = imageSrc && !failedImages[imageSrc];
+                <>
+                  <div className="db-products-grid">
+                    {categoryProducts.slice(0, visibleCount).map((item, idx) => {
+                      const alreadyAdded = isInCart(item);
+                      const imageCandidates = (item.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
+                      const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
+                      const hasImage = imageSrc && !failedImages[imageSrc];
 
-                    return (
-                      <div key={`${item.name || 'item'}-${idx}`} className="db-product-card">
-                        <div className="db-product-image-wrap">
-                          {hasImage ? (
-                            <img src={imageSrc} alt={item.name || 'Product'} onError={() => markImageFailed(imageSrc)} />
-                          ) : (
-                            <div className="db-no-image">IMAGE NOT FOUND</div>
-                          )}
-                        </div>
+                      return (
+                        <div key={`${item.name || 'item'}-${idx}`} className="db-product-card">
+                          <div className="db-product-image-wrap">
+                            {hasImage ? (
+                              <img src={imageSrc} alt={item.name || 'Product'} loading="lazy" onError={() => markImageFailed(imageSrc)} />
+                            ) : (
+                              <div className="db-no-image">IMAGE NOT FOUND</div>
+                            )}
+                          </div>
 
                         <div className="db-product-body">
                           <h3>{item.name || 'Unnamed Product'}</h3>
@@ -462,6 +465,16 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                     );
                   })}
                 </div>
+                  {visibleCount < categoryProducts.length && (
+                    <button 
+                      className="db-btn db-btn-light" 
+                      onClick={() => setVisibleCount((prev) => prev + 40)} 
+                      style={{ margin: '2rem auto', display: 'block', padding: '0.75rem 2.5rem', fontWeight: 'bold' }}
+                    >
+                      Load More
+                    </button>
+                  )}
+                </>
               ) : (
                 <div className="db-empty-state">
                   <h4>No products found for this section.</h4>
