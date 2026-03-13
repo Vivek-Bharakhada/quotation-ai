@@ -1,0 +1,10 @@
+# Railway Monorepo Configuration
+# This file helps Railway identify the services
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Default to backend if not specified
+healthcheckPath = "/status"
+restartPolicyType = "ON_FAILURE"
