@@ -14,6 +14,7 @@ function App() {
   const [cart, setCart] = useState([]);
   const [theme, setTheme] = useState('light');
   const [externalSearch, setExternalSearch] = useState(null);
+  const [footerVisible, setFooterVisible] = useState(true);
   const pageViewClass = `${currentPage}-view`;
 
   const toggleTheme = () => {
@@ -49,17 +50,19 @@ function App() {
             setCart={setCart}
             externalSearch={externalSearch}
             setExternalSearch={setExternalSearch}
+            setFooterVisible={setFooterVisible}
           />
         );
       case 'quotation':
         return <Quotation cart={cart} setCart={setCart} />;
       default:
-        return <Search cart={cart} setCart={setCart} />;
+        return <Search cart={cart} setCart={setCart} setFooterVisible={setFooterVisible} />;
     }
   };
 
   return (
     <div className={`App ${theme === 'dark' ? 'dark-theme' : ''} ${pageViewClass}`}>
+      <div className="App-grain" />
       <nav className="navbar">
         <div className="nav-shell">
           <div className="nav-brand">
@@ -112,7 +115,12 @@ function App() {
         </div>
       </nav>
 
-      <main className="container">{renderPage()}</main>
+      <main className="container">
+        {renderPage()}
+        {footerVisible && (
+          <footer className="footer">&copy; {new Date().getFullYear()} Shreeji Ceramica &mdash; Redefining Luxury | Quotation Management System</footer>
+        )}
+      </main>
 
       {cart.length > 0 && currentPage === 'search' && (
         <div
@@ -150,8 +158,6 @@ function App() {
           </span>
         </div>
       )}
-
-      <footer className="footer">&copy; {new Date().getFullYear()} Shreeji Ceramica &mdash; Redefining Luxury | Quotation Management System</footer>
     </div>
   );
 }

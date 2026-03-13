@@ -722,3 +722,78 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
         unique_res.append(item)
 
     return unique_res
+
+
+def get_suggestions(query: str, limit: int = 10):
+    if not query or len(query.strip()) < 2:
+        return []
+
+    q = query.strip().lower()
+    q_words = [w for w in re.split(r'[\s\-\/]+', q) if len(w) >= 2]
+    if not q_words:
+        return []
+
+    # Fast retrieval using keyword index
+    potential_indices = set()
+    for w in q_words:
+        # Check for prefix matches in our keyword index as well
+        for key in keyword_index:
+            if key.startswith(w):
+                potential_indices.update(keyword_index[key])
+            if len(potential_indices) > 500: break
+        if len(potential_indices) > 500: break
+
+    suggestions = []
+    seen = set()
+
+    # Score and rank candidates
+    for idx in potential_indices:
+        item = stored_items[idx]
+        name = item.get("name", "")
+        if not name: continue
+        
+        name_lower = name.lower()
+        
+        # Simple scoring
+        score = 0
+        if q in name_lower: score += 10
+        if any(w in name_lower for w in q_words): score += 5
+        
+        # Use a more descriptive text for the suggestion key
+        display_text = name.split(" - ")[0].strip()
+        full_display = name.strip()
+        if not display_text: continue
+        
+        key = full_display.lower()
+        if key not in seen:
+            suggestions.append({
+                "score": score,
+                "code": display_text,
+                "full_name": full_display,
+                "brand": item.get("brand", "Aquant"),
+                "image_list": item.get("images", [])
+            })
+            seen.add(key)
+        
+        if len(suggestions) > 50: break
+
+    # Sort by score descending and then by full text length
+    suggestions.sort(key=lambda x: (-x["score"], len(x["full_name"])))
+    
+    final_results = []
+    for s in suggestions[:limit]:
+        full_name = s["full_name"]
+        parts = full_name.split(" - ", 1)
+        code = parts[0].strip()
+        name_desc = parts[1].strip() if len(parts) > 1 else ""
+        
+        final_results.append({
+            "text": code,
+            "description": name_desc,
+            "brand": s["brand"],
+            "image": s["image_list"][0] if s["image_list"] else None
+        })
+        
+    return final_results
+
+

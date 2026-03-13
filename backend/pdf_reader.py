@@ -100,23 +100,33 @@ FINISH_CODE_LABELS = {
     "BSS": "Brushed Stainless Steel Finish",
     "CP": "Chrome",
     "GB": "Glossy Black",
-    "GG": "Graphite Grey",
+    "GG": "Graphite Grey/Glossy Gold",
     "LG": "Lunar Grey",
     "MB": "Matt Black",
     "MG": "Matt Grey",
+    "MI": "Matt Ivory",
     "MW": "Matt White/White",
+    "OG": "Olive Green",
+    "RB": "Royal Blue",
     "RG": "Rose Gold",
     "RGB": "Rose Gold/Matt Black",
     "RGW": "Rose Gold/Matt White",
     "RN": "Royal Navy",
+    "SB": "Sky Blue",
     "SG": "Seafoam Green",
+    "TCR": "Terracotta Red",
     "W": "White",
+    "G": "Gold",
 }
 
+AQUANT_FINISH_IMAGE_VARIANT_ORDER = ("BRG", "GG", "RG", "BG", "MB", "CP", "MI", "MG", "TCR", "OG", "SB", "RB", "G", "SSF", "AB", "AC", "BC", "ORB", "AN", "SN")
+
+AQUANT_SPECIAL_FINISH_IMAGE_ROW_PAGES = set(range(4, 54)) | set(range(68, 83)) | {59, 61, 91}
+AQUANT_SPECIAL_FINISH_ROW_TOLERANCE = 5.0
+
+
 IMAGE_GENERATION_VERSION = "clip_v2"
-AQUANT_FINISH_IMAGE_VARIANT_ORDER = ("BRG", "GG", "RG", "BG", "MB", "CP")
-AQUANT_SPECIAL_FINISH_IMAGE_ROW_PAGES = {45, 46, 47, 48, 49}
-AQUANT_SPECIAL_FINISH_ROW_TOLERANCE = 3.0
+
 
 AQUANT_MANUAL_FAMILY_OVERRIDES = {
     (40, "1313"): {"generic_name": "Ceiling Mounted Brass Basin Tap Mouth Operated", "cp_price": "23950", "variant_price": "35500"},
@@ -237,7 +247,18 @@ def split_aquant_segments(text):
     if not cleaned:
         return []
 
-    tokens = [clean_text(token) for token in re.split(r'\|', cleaned) if clean_text(token)]
+    # First, split by obvious separators
+    initial_tokens = re.split(r'\|', cleaned)
+    
+    # Then for each token, check if it contains multiple product codes clumped together
+    # Rule: Split before a 4-digit code if it's preceded by letters or more than 2 spaces
+    tokens = []
+    for tok in initial_tokens:
+        sub_tokens = re.split(r'(?=\b\d{4}[A-Z]{1,4}\b|\b\d{4}\s+[A-Z]{1,4}\b)', tok)
+        tokens.extend([clean_text(st) for st in sub_tokens if clean_text(st)])
+
+    if not tokens:
+        return []
     if len(tokens) <= 1:
         return [cleaned]
 
@@ -592,91 +613,77 @@ def build_aquant_image_rows(img_records, y_tolerance=AQUANT_SPECIAL_FINISH_ROW_T
 
 
 def apply_aquant_special_finish_image_rows(page_num, page_products, img_records):
+    # This function resolves image mapping for "Special Finish" pages in Aquant PDF
+    # where multiple colors (Matt Black, Gold, etc.) are shown in a grid or row.
     page_number = page_num + 1
-    if page_number not in AQUANT_SPECIAL_FINISH_IMAGE_ROW_PAGES:
+    
+    # Auto-detect special pages by checking the category/header
+    is_special_page = page_number in AQUANT_SPECIAL_FINISH_IMAGE_ROW_PAGES
+    if not is_special_page:
+        sample_cats = [it.get("category", "").upper() for it in page_products[:15]]
+        if any("SPECIAL FINISH" in c or "UNIQUE MATERIAL" in c or "PVD FINISH" in c for c in sample_cats):
+            is_special_page = True
+            
+    if not is_special_page:
         return
 
-    image_rows = [
-        row
-        for row in build_aquant_image_rows(img_records)
-        if 4 <= len(row["images"]) <= len(AQUANT_FINISH_IMAGE_VARIANT_ORDER)
-    ]
-    if not image_rows:
-        return
-
+    # Group products by their base family (e.g., all 1505 variants together)
     family_buckets = {}
     for item in page_products:
         family_key = extract_product_family_key(item.get("name", ""))
         if family_key:
             family_buckets.setdefault(family_key, []).append(item)
 
-    ordered_families = []
     for family_key, bucket_items in family_buckets.items():
-        if not any(
-            "ACCESSORIES IN SPECIAL FINISHES" in clean_text(item.get("category", "")).upper()
-            for item in bucket_items
-        ):
+        # Visual Alignment Strategy:
+        # Instead of guessing rows, we look for images that are vertically aligned with the items.
+        # This handles grids (1505) and long rows perfectly.
+        
+        family_cy_min = min(item.get("cy", 0) for item in bucket_items)
+        family_cy_max = max(item.get("cy", 0) for item in bucket_items)
+        
+        # Look for images within 550pt above or 150pt below the family y-range
+        nearby_images = [
+            img for img in img_records
+            if (family_cy_min - 550) <= (img["rect"].y1 + img["rect"].y0)/2 <= (family_cy_max + 150)
+        ]
+        
+        if not nearby_images:
             continue
-
-        family_tokens = {
-            extract_variant_token(item.get("name", ""))
-            for item in bucket_items
-            if extract_variant_token(item.get("name", ""))
-        }
-        if len(family_tokens) < 4 or not family_tokens.issubset(AQUANT_FINISH_IMAGE_VARIANT_ORDER):
-            continue
-
-        ordered_families.append(
-            (
-                min(item.get("cy", 0) for item in bucket_items),
-                family_key,
-                bucket_items,
-                [token for token in AQUANT_FINISH_IMAGE_VARIANT_ORDER if token in family_tokens],
-            )
-        )
-
-    ordered_families.sort(key=lambda row: row[0])
-    used_row_indexes = set()
-
-    for _, _, bucket_items, ordered_tokens in ordered_families:
-        family_center_y = sum(item.get("cy", 0) for item in bucket_items) / len(bucket_items)
-        family_center_x = sum(item.get("cx", 0) for item in bucket_items) / len(bucket_items)
-        best_row_idx = -1
-        best_score = float("inf")
-
-        for row_idx, row in enumerate(image_rows):
-            if row_idx in used_row_indexes:
-                continue
-            if len(row["images"]) != len(ordered_tokens):
-                continue
-
-            dy = family_center_y - row["cy"]
-            if dy < 25 or dy > 220:
-                continue
-
-            row_center_x = sum(img["cx"] for img in row["images"]) / len(row["images"])
-            score = dy + (abs(row_center_x - family_center_x) * 0.1)
-            if score < best_score:
-                best_score = score
-                best_row_idx = row_idx
-
-        if best_row_idx == -1:
-            continue
-
-        row_images = image_rows[best_row_idx]["images"]
-        token_to_path = {
-            token: row_images[idx]["path"]
-            for idx, token in enumerate(ordered_tokens)
-            if idx < len(row_images)
-        }
-
+            
         for item in bucket_items:
-            token = extract_variant_token(item.get("name", ""))
-            mapped_path = token_to_path.get(token)
-            if mapped_path:
-                item["images"] = [mapped_path]
-
-        used_row_indexes.add(best_row_idx)
+            # Skip if already has image (manual overrides)
+            if item.get("images"): continue
+            
+            p_cx = item.get("cx", 0)
+            p_cy = item.get("cy", 0)
+            
+            # Find best nearby image based on horizontal alignment
+            best_img = None
+            best_score = float("inf")
+            
+            for img in nearby_images:
+                img_rect = img["rect"]
+                img_cx = (img_rect.x0 + img_rect.x1) / 2
+                img_cy = (img_rect.y0 + img_rect.y1) / 2
+                
+                dx = abs(img_cx - p_cx)
+                dy = img_cy - p_cy # positive if image is below, negative if image is above
+                
+                # We prefer images directly ABOVE (-dy) or slightly below (+dy)
+                v_penalty = 0
+                if dy > 50: v_penalty = 200 # Penalize images below label
+                if dy < -450: v_penalty = 150 # Penalize very far images
+                
+                # Weight horizontal alignment VERY heavily (6.0x) for grid pages
+                score = (dx * 6.0) + abs(dy) + v_penalty
+                
+                if score < best_score:
+                    best_score = score
+                    best_img = img
+            
+            if best_img and best_score < 750:
+                item["images"] = [best_img["path"]]
 
 
 def extract_content(pdf_path, max_pages=None):
@@ -740,7 +747,31 @@ def extract_content(pdf_path, max_pages=None):
             except Exception:
                 continue
 
-        # ── 1.5. Kohler Extraction Logic ─────────────────────
+        # ── 1.2. Fallback for inline images (e.g. pg 53 ceiling showers) ─────
+        try:
+            d = page.get_text("dict")
+            for i, b in enumerate(d.get("blocks", [])):
+                if b.get("type") == 1: # Image block
+                    rect = fitz.Rect(b["bbox"])
+                    # Check for overlap with existing images to avoid duplicates
+                    is_duplicate = False
+                    for existing in img_records:
+                        if rect.intersects(existing["rect"]) and rect.intersect(existing["rect"]).area > rect.area * 0.8:
+                            is_duplicate = True
+                            break
+                    if is_duplicate:
+                        continue
+                        
+                    img_filename = f"{pdf_prefix}_p{page_num}_block{i}.jpg"
+                    img_path = os.path.join(image_dir, img_filename)
+                    if not os.path.exists(img_path):
+                        zoom = 2.0
+                        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=rect, alpha=False)
+                        pix.save(img_path)
+                        pix = None
+                    img_records.append({"path": f"/static/images/{img_filename}", "rect": rect})
+        except Exception:
+            pass
         def map_kohler_category(text):
             t = text.upper()
             if "FRENCH GOLD" in t: return "French Gold"
@@ -1210,10 +1241,13 @@ def extract_content(pdf_path, max_pages=None):
             if re.match(r'^\d{3,}-\d+', w): return True
             # Numeric-dash-alpha: 1234-A
             if re.match(r'^\d{3,}-[A-Z]', w): return True
+            # Numeric-alpha-fusion: 7512MI, 7512OG
+            if re.match(r'^\d{4,}[A-Z]{1,4}', w): return True
             # Code with space and letters: 1918 AG, 1845 W
             if len(words) > 1 and words[0].isdigit() and len(words[0]) >= 4 and len(words[1]) <= 3:
                 return True
             return False
+
 
 
         def is_price_line(text):
@@ -1225,7 +1259,7 @@ def extract_content(pdf_path, max_pages=None):
         x_starts = sorted(set(round(b[0] / 50) * 50 for b in blocks if b[6] == 0))
         prev = x_starts[0] if x_starts else 0
         for x in x_starts[1:]:
-            if x - prev > page_width * 0.20:
+            if x - prev > 85:
                 col_dividers.append(x)
             prev = x
         col_dividers.append(page_width + 1)
@@ -1285,9 +1319,9 @@ def extract_content(pdf_path, max_pages=None):
         
         for p in grouped_products:
             text = p['text'].strip()
-            t_comp = ""
-            
+            t_comp = re.sub(r'[\s/\-]+', '', text)
             pm = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]+)', t_comp, re.IGNORECASE)
+            block_master_price = pm.group(1).replace(",", "") if pm else ""
             
             clean_lines = [clean_text(l) for l in text.split('\n') if clean_text(l)]
             expanded_lines = []
@@ -1301,7 +1335,7 @@ def extract_content(pdf_path, max_pages=None):
             
             # Pre-process lines to split those containing multiple product codes internally
             split_lines = []
-            for l in []:
+            for l in clean_lines:
                 # If line has 'l' or '|' and multiple codes, split it
                 # Logic: Find all occurrences of product-code-like patterns
                 parts = re.split(r'\s+[l|I]\s+(?=\d{4}|[A-Z]{1,3}-\d+|\d{3,}-[A-Z])', l)
@@ -1486,38 +1520,48 @@ def extract_content(pdf_path, max_pages=None):
         # Image Matching
         available_images = list(img_records)
         used_image_paths = set()
-        
+        page_half = page.rect.width / 2  # column boundary
+
         for p_data in page_products:
             best_img_idx = -1
             best_dist = float("inf")
-            
+
+            p_cx = p_data.get("cx") or 0
+            p_cy = p_data.get("cy") or 0
+            p_col = 0 if p_cx < page_half else 1
+
             for i_idx, ir in enumerate(available_images):
                 if ir["rect"] is None: continue
                 img_path = ir["path"]
                 if img_path in used_image_paths: continue
-                
+
                 img_rect = ir["rect"]
                 img_cx = (img_rect.x0 + img_rect.x1) / 2
                 img_cy = (img_rect.y0 + img_rect.y1) / 2
-                
-                dx = abs(img_cx - p_data["cx"])
-                dy = img_cy - p_data["cy"]
-                
-                # Penalize images far below the product text
+                i_col = 0 if img_cx < page_half else 1
+
+                dx = abs(img_cx - p_cx)
+                dy = img_cy - p_cy
+
+                col_penalty = 0 if p_col == i_col else 400
                 v_penalty = 0
-                if dy > 50: v_penalty = 300 
-                if dy < -400: v_penalty = 200 # Too far above
-                
-                dist = (dx**2 + dy**2)**0.5 + v_penalty
-                
-                if dist < best_dist and dist < 320:
+                if dy > 50: v_penalty = 300
+                if dy < -450: v_penalty = 200
+
+                dist = (dx**2 + dy**2)**0.5 + v_penalty + col_penalty
+
+                if dist < best_dist and dist < 750:
+
+
                     best_dist = dist
                     best_img_idx = i_idx
+
 
             if best_img_idx != -1:
                 img_path = available_images[best_img_idx]["path"]
                 p_data["images"] = [img_path]
                 used_image_paths.add(img_path)
+
 
         detail_candidates = [
             (idx, item) for idx, item in enumerate(page_products)
@@ -1769,20 +1813,24 @@ def extract_content(pdf_path, max_pages=None):
             img_rect = ir["rect"]
             img_cx = (img_rect.x0 + img_rect.x1) / 2
             img_cy = (img_rect.y0 + img_rect.y1) / 2
+            i_col = 0 if img_cx < page_half else 1
             best_family_key = None
             best_score = float("inf")
 
             for family_key, bucket in family_buckets.items():
                 local_best = float("inf")
                 for _, item in bucket:
-                    dx = abs(img_cx - item["cx"])
-                    dy = img_cy - item["cy"]
+                    p_cx = item.get("cx") or 0
+                    p_cy = item.get("cy") or 0
+                    p_col = 0 if p_cx < page_half else 1
+                    col_penalty = 0 if p_col == i_col else 400
+                    dx = abs(img_cx - p_cx)
+                    dy = img_cy - p_cy
                     v_penalty = 0
-                    if dy > 70:
-                        v_penalty = 220
-                    if dy < -250:
-                        v_penalty = 180
-                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty
+                    if dy > 70: v_penalty = 220
+                    if dy < -480: v_penalty = 180
+
+                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
                     if score < local_best:
                         local_best = score
 
@@ -1790,7 +1838,9 @@ def extract_content(pdf_path, max_pages=None):
                     best_score = local_best
                     best_family_key = family_key
 
-            if best_family_key and best_score < 320:
+            if best_family_key and best_score < 750:
+
+
                 family_image_map[best_family_key].append(img_path)
                 claimed_image_paths.add(img_path)
 
@@ -1812,15 +1862,21 @@ def extract_content(pdf_path, max_pages=None):
                     img_rect = ir["rect"]
                     img_cx = (img_rect.x0 + img_rect.x1) / 2
                     img_cy = (img_rect.y0 + img_rect.y1) / 2
-                    dx = abs(img_cx - item["cx"])
-                    dy = img_cy - item["cy"]
+                    p_cx = item.get("cx") or 0
+                    p_cy = item.get("cy") or 0
+                    p_col = 0 if p_cx < page_half else 1
+                    i_col = 0 if img_cx < page_half else 1
+                    col_penalty = 0 if p_col == i_col else 400
+                    dx = abs(img_cx - p_cx)
+                    dy = img_cy - p_cy
                     v_penalty = 0
-                    if dy > 70:
-                        v_penalty = 220
-                    if dy < -250:
-                        v_penalty = 180
-                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty
-                    if score < best_score:
+                    if dy > 70: v_penalty = 220
+                    if dy < -480: v_penalty = 180
+                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
+                    if score < best_score and score < 750:
+
+
+
                         best_score = score
                         best_path = img_path
 
@@ -1841,6 +1897,8 @@ def extract_content(pdf_path, max_pages=None):
                 continue
             if "cx" in p: del p["cx"]
             if "cy" in p: del p["cy"]
+
+
             if "_group_kind" in p: del p["_group_kind"]
             if "_price_source" in p: del p["_price_source"]
             content_list.append(p)

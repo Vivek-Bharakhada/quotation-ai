@@ -28,7 +28,7 @@ export default function Quotation({ cart }) {
         room: c.category || c.room || '',
         rawText: c.rawText || '',
       }))
-      : [{ name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]
+      : [{ name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]
   );
 
   const [discountPercent, setDiscountPercent] = useState(0);
@@ -43,6 +43,26 @@ export default function Quotation({ cart }) {
   const [madeBy, setMadeBy] = useState('');
   const [madeByPhone, setMadeByPhone] = useState('');
   const [madeByEmail, setMadeByEmail] = useState('');
+
+  const staffOptions = [
+    { name: 'Harsh Bhai', phone: '+91 82385 21277' },
+    { name: 'Karan Bhai', phone: '+91 82009 17069' },
+    { name: 'Kunal Bhai', phone: '+91 98987 13167' },
+  ];
+
+  const handleStaffSelect = (e) => {
+    const val = e.target.value;
+    if (!val) {
+      setMadeBy('');
+      setMadeByPhone('');
+      return;
+    }
+    const staff = staffOptions.find(s => s.name === val);
+    if (staff) {
+      setMadeBy(staff.name);
+      setMadeByPhone(staff.phone);
+    }
+  };
 
   const fetchHistory = async () => {
     try {
@@ -100,7 +120,7 @@ export default function Quotation({ cart }) {
   };
 
   const addItem = () => {
-    setItems([...items, { name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]);
+    setItems([...items, { name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]);
   };
 
   const removeItem = (index) => {
@@ -108,7 +128,7 @@ export default function Quotation({ cart }) {
     setItems(
       newItems.length > 0
         ? newItems
-        : [{ name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '' }]
+        : [{ name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]
     );
   };
 
@@ -295,9 +315,9 @@ export default function Quotation({ cart }) {
 
       // FULL QUOTATION DETAILS
       const fullMsg = [
-        `🏢 *SHREEJI CERAMICA*`,
-        `Redefining Luxury | Ph: 9033745455`,
-        `═══════════════════════════════════`,
+        showBgLogo ? `🏢 *SHREEJI CERAMICA*` : null,
+        showBgLogo ? `Redefining Luxury | Ph: 9033745455` : null,
+        showBgLogo ? `═══════════════════════════════════` : null,
         ``,
         `📋 *QUOTATION*`,
         `Quotation #: ${quoteNumber || 'N/A'}`,
@@ -381,11 +401,11 @@ export default function Quotation({ cart }) {
       }
 
       const pdfLink = generatedPdfServerUrl || '';
-      const subject = `Quotation ${quoteNumber} — Shreeji Ceramica`;
+      const subject = showBgLogo ? `Quotation ${quoteNumber} — Shreeji Ceramica` : `Quotation ${quoteNumber}`;
       const body = [
         `Dear ${client.client_name || 'Customer'},`,
         ``,
-        `Thank you for your interest in Shreeji Ceramica — Redefining Luxury.`,
+        showBgLogo ? `Thank you for your interest in Shreeji Ceramica — Redefining Luxury.` : `Thank you for your interest.`,
         ``,
         `Please find your quotation details below:`,
         ``,
@@ -412,13 +432,13 @@ export default function Quotation({ cart }) {
         ``,
         pdfLink ? `Download PDF: ${pdfLink}` : null,
         ``,
-        `For any queries, contact us at:`,
-        `Phone : 9033745455`,
-        `Email : shreejiceramica303@gmail.com`,
-        `Web   : www.shreejiceramica.com`,
+        showBgLogo ? `For any queries, contact us at:` : null,
+        showBgLogo ? `Phone : 9033745455` : null,
+        showBgLogo ? `Email : shreejiceramica303@gmail.com` : null,
+        showBgLogo ? `Web   : www.shreejiceramica.com` : null,
         ``,
         `Warm regards,`,
-        `Shreeji Ceramica Team`,
+        showBgLogo ? `Shreeji Ceramica Team` : `Sales Team`,
       ].filter(l => l !== null).join('\n');
 
       // Try Gmail compose URL first (opens Gmail in browser directly)
@@ -545,6 +565,20 @@ export default function Quotation({ cart }) {
                 />
                 <input
                   className="qt-field"
+                  name="sku"
+                  value={item.sku || ''}
+                  placeholder="SKU"
+                  onChange={(e) => handleItemChange(index, e)}
+                />
+                <input
+                  className="qt-field"
+                  name="size"
+                  value={item.size || ''}
+                  placeholder="Size"
+                  onChange={(e) => handleItemChange(index, e)}
+                />
+                <input
+                  className="qt-field"
                   name="discount"
                   type="number"
                   value={item.discount}
@@ -607,44 +641,42 @@ export default function Quotation({ cart }) {
               onChange={(e) => setShowBgLogo(e.target.checked)}
               className="qt-bg-logo-check"
             />
-            <span className="qt-bg-logo-icon">🖼️</span>
-            Show Background Logo in PDF
+            <span className="qt-bg-logo-icon">🏢</span>
+            Include Shreeji Office Branding (Letterhead)
           </label>
         </div>
 
         <div className="qt-madeby-section">
-          <p className="qt-madeby-title">👤 Made By <span>(clickable in PDF)</span></p>
+          <p className="qt-madeby-title">👤 PREPARED BY <span>(Select Staff)</span></p>
           <div className="qt-madeby-fields">
-            <div className="qt-madeby-wrap">
-              <input
+            <div className="qt-madeby-wrap" style={{ gridColumn: 'span 2' }}>
+              <select
                 className="qt-field qt-madeby-input"
-                id="made-by-input"
-                type="text"
-                placeholder="Name (e.g. Vivek)"
+                id="staff-select"
                 value={madeBy}
-                onChange={(e) => setMadeBy(e.target.value)}
-              />
+                onChange={handleStaffSelect}
+              >
+                <option value="">— Select Staff —</option>
+                {staffOptions.map(staff => (
+                  <option key={staff.name} value={staff.name}>
+                    {staff.name} — {staff.phone}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="qt-madeby-wrap">
-              <input
-                className="qt-field qt-madeby-input"
-                id="made-by-phone-input"
-                type="tel"
-                placeholder="Phone (optional)"
-                value={madeByPhone}
-                onChange={(e) => setMadeByPhone(e.target.value)}
-              />
-            </div>
-            <div className="qt-madeby-wrap">
-              <input
-                className="qt-field qt-madeby-input"
-                id="made-by-email-input"
-                type="email"
-                placeholder="Email (optional)"
-                value={madeByEmail}
-                onChange={(e) => setMadeByEmail(e.target.value)}
-              />
-            </div>
+            
+            {madeBy && (
+              <div className="qt-madeby-wrap">
+                <input
+                  className="qt-field qt-madeby-input"
+                  type="text"
+                  placeholder="Staff Phone"
+                  value={madeByPhone}
+                  readOnly
+                  style={{ background: 'rgba(255,255,255,0.05)', opacity: 0.8 }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </section>

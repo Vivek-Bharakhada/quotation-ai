@@ -1,58 +1,23 @@
 .db-root {
+  width: 100%;
+  max-width: 1720px;
+  margin: 0 auto;
+  padding: clamp(1.2rem, 3vw, 3rem);
   position: relative;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1700px, calc(100vw - 1.2rem));
-  max-width: min(1700px, calc(100vw - 1.2rem));
-  min-height: calc(100vh - 5rem);
-  margin: 0;
-  padding: clamp(0.95rem, 1.2vw, 1.35rem);
-  border-radius: 2.1rem;
+  background: var(--card-bg);
+  border-radius: 2.5rem;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   animation: fadeIn 0.5s ease-out;
   isolation: isolate;
-  overflow: hidden;
-  --db-surface-start: #f8fafc;
-  --db-surface-end: #eef2f7;
-  --db-strip: rgba(190, 30, 45, 0.65);
-  --db-glow: rgba(190, 30, 45, 0.28);
-  --db-accent-soft: rgba(190, 30, 45, 0.24);
-  --db-cool-soft: rgba(14, 116, 144, 0.2);
-  border: 1px solid rgba(226, 232, 240, 0.78);
-  background: linear-gradient(156deg, rgba(255, 255, 255, 0.74) 0%, rgba(243, 248, 255, 0.58) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 28px 46px -34px rgba(15, 23, 42, 0.26),
-    0 14px 26px -22px rgba(15, 23, 42, 0.26);
-  backdrop-filter: blur(4px) saturate(1.05);
-  -webkit-backdrop-filter: blur(4px) saturate(1.05);
 }
 
-.db-root::before,
-.db-root::after {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-  z-index: 0;
+.dark-theme .db-root {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(20px);
 }
 
-.db-root::before {
-  inset: -38% -24% auto;
-  height: 52%;
-  background:
-    radial-gradient(circle at 20% 30%, var(--db-accent-soft), transparent 62%),
-    radial-gradient(circle at 82% 24%, var(--db-cool-soft), transparent 65%);
-  opacity: 0.72;
-}
-
-.db-root::after {
-  left: 1.2rem;
-  right: 1.2rem;
-  top: 0.72rem;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent 0%, var(--db-strip) 24%, var(--db-glow) 68%, transparent 100%);
-  opacity: 0.82;
-}
+/* Standardized container glows removed for consistency */
 
 .db-root > * {
   position: relative;

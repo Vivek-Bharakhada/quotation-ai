@@ -1,48 +1,23 @@
 .qt-root {
-  width: min(1580px, calc(100vw - 1.2rem));
-  max-width: min(1580px, calc(100vw - 1.2rem));
+  width: 100%;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: clamp(1rem, 1.28vw, 1.4rem);
-  border-radius: 2rem;
-  border: 1px solid rgba(226, 232, 240, 0.78);
-  background: linear-gradient(156deg, rgba(255, 255, 255, 0.75) 0%, rgba(244, 248, 255, 0.6) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.84),
-    0 30px 48px -34px rgba(15, 23, 42, 0.3);
-  backdrop-filter: blur(4px) saturate(1.04);
-  -webkit-backdrop-filter: blur(4px) saturate(1.04);
+  padding: clamp(1.2rem, 3vw, 3rem);
+  position: relative;
+  background: var(--card-bg);
+  border-radius: 2.5rem;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   animation: fadeIn 0.5s ease-out;
   isolation: isolate;
-  position: relative;
-  overflow: hidden;
 }
 
-.qt-root::before,
-.qt-root::after {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-  z-index: 0;
+.dark-theme .qt-root {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(20px);
 }
 
-.qt-root::before {
-  inset: -36% -24% auto;
-  height: 52%;
-  background:
-    radial-gradient(circle at 16% 34%, rgba(190, 30, 45, 0.22), transparent 62%),
-    radial-gradient(circle at 82% 22%, rgba(14, 116, 144, 0.2), transparent 65%);
-  opacity: 0.74;
-}
-
-.qt-root::after {
-  left: 1.2rem;
-  right: 1.2rem;
-  top: 0.72rem;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent 0%, rgba(190, 30, 45, 0.5) 32%, rgba(14, 116, 144, 0.48) 72%, transparent 100%);
-  opacity: 0.82;
-}
+/* Unified background effects */
 
 .qt-root>* {
   position: relative;
@@ -160,7 +135,7 @@
 
 .qt-item-grid {
   display: grid;
-  grid-template-columns: 72px minmax(180px, 1fr) 140px 100px 70px 80px auto;
+  grid-template-columns: 72px minmax(180px, 1fr) 120px 100px 60px 80px 80px 80px auto;
   gap: 0.7rem;
   align-items: center;
   margin-bottom: 0.72rem;

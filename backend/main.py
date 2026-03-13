@@ -415,6 +415,11 @@ def search_item(q: str, brand: str = None, smart: bool = False, exact: bool = Fa
     print(f"DEBUG: Found {len(results)} results")
     return {"results": results}
 
+@app.get("/search-suggestions")
+def search_suggestions(q: str):
+    return {"suggestions": search_engine.get_suggestions(q)}
+
+
 @app.post("/catalog/add")
 async def add_manual_item(
     name: str = Form(...),
@@ -639,3 +644,8 @@ def browse_collection(brand: str, collection: str = None):
         if len(results) >= 500: break # Show more for browsing
     
     return {"results": results}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

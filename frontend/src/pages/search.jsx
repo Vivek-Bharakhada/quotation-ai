@@ -1,24 +1,69 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './search.css';
 
 import BASE from '../api';
 
 
-export default function Search({ cart, setCart }) {
+export default function Search({ cart, setCart, setFooterVisible }) {
   const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedBrand, setSelectedBrand] = useState('all');
   const [viewProduct, setViewProduct] = useState(null);
   const [failedImages, setFailedImages] = useState({});
+  const suggestionRef = useRef(null);
 
-  const handleSearch = async (brandOverride) => {
-    const q = query.trim();
+  // Sync footer visibility with suggestions
+  useEffect(() => {
+    if (setFooterVisible) {
+      setFooterVisible(!showSuggestions);
+    }
+    // Cleanup to ensure footer comes back when leaving search page
+    return () => setFooterVisible && setFooterVisible(true);
+  }, [showSuggestions, setFooterVisible]);
+
+  // Handle clicking outside suggestions
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Fetch suggestions when query changes
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      axios.get(`${BASE}/search-suggestions?q=${encodeURIComponent(query)}`)
+        .then(res => {
+          const list = res.data.suggestions || [];
+          setSuggestions(list);
+          if (list.length > 0) setShowSuggestions(true);
+        })
+        .catch(() => setSuggestions([]));
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const handleSearch = async (overrideQuery, brandOverride) => {
+    const q = (typeof overrideQuery === 'string' ? overrideQuery : query).trim();
     if (!q) return;
 
     setLoading(true);
     setResults([]);
+    setShowSuggestions(false);
 
     const ts = Date.now();
     const brandParam = typeof brandOverride === 'string' ? brandOverride : selectedBrand;
@@ -36,6 +81,12 @@ export default function Search({ cart, setCart }) {
         console.error('Search failed', err);
         setLoading(false);
       });
+  };
+
+  const selectSuggestion = (s) => {
+    setQuery(s.text);
+    setShowSuggestions(false);
+    handleSearch(s.text);
   };
 
   const addToCart = (product) => {
@@ -95,11 +146,16 @@ export default function Search({ cart, setCart }) {
 
   return (
     <div className="sp-root">
-      <header className="sp-head">
-        <h2 className="sp-title">
-          Accurate <span>Search</span>
-        </h2>
-        <p className="sp-subtitle">Find products by name, model number, or code instantly</p>
+      <header className="sp-hero">
+        <div className="sp-hero-content">
+          <h1 className="sp-hero-title">
+            Discover <span>Luxury</span>
+          </h1>
+          <p className="sp-hero-subtitle">Search through thousands of premium bathroom fittings and tiles</p>
+        </div>
+        <div className="sp-hero-visual">
+          <img src="/hero.png" alt="Luxury Bathroom" className="sp-hero-img" />
+        </div>
       </header>
 
       <section className="sp-brand-wrap">
@@ -116,26 +172,60 @@ export default function Search({ cart, setCart }) {
         </div>
       </section>
 
-      <section className="sp-search-shell">
-        <input
-          className="sp-search-input"
-          placeholder="e.g. 9272, K-28362IN, Shower Mixer..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-        />
+      <div className="sp-search-container" ref={suggestionRef}>
+        <section className="sp-search-shell">
+          <input
+            className="sp-search-input"
+            placeholder="e.g. 9272, K-28362IN, Shower Mixer..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+          />
 
-        <button className="sp-search-btn" onClick={() => handleSearch()} disabled={loading}>
-          {loading ? 'SEARCHING...' : 'SEARCH'}
-        </button>
-      </section>
+          <button className="sp-search-btn" onClick={() => handleSearch()} disabled={loading}>
+            {loading ? 'SEARCHING...' : 'SEARCH'}
+          </button>
+        </section>
+
+        {showSuggestions && (
+          <div className="sp-suggestions-list">
+            {suggestions.map((s, idx) => (
+              <div
+                key={idx}
+                className="sp-suggestion-item"
+                onClick={() => selectSuggestion(s)}
+              >
+                <div className="sp-sugg-left">
+                  {s.image ? (
+                    <img src={`${BASE}${s.image}`} alt="" className="sp-sugg-img" />
+                  ) : (
+                    <div className="sp-sugg-no-img">NO IMG</div>
+                  )}
+                  <div className="sp-sugg-info">
+                    <span className="sp-sugg-text">{s.text}</span>
+                    <span className="sp-sugg-desc">{s.description}</span>
+                  </div>
+                </div>
+                <span className="sp-sugg-brand">{(s.brand || 'Aquant').toUpperCase()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
 
       {showSearchSummary && <div className="sp-search-summary">{searchSummary}</div>}
 
       {loading && (
-        <div className="sp-loading">
-          <div className="spinner sp-spinner" />
-          <div className="sp-loading-text">PRECISION SCANNING...</div>
+        <div className="sp-loading-shimmer">
+          {[1, 2, 3, 4, 5, 6].map(n => (
+            <div key={n} className="sp-shimmer-card">
+              <div className="sp-shimmer-media"></div>
+              <div className="sp-shimmer-line"></div>
+              <div className="sp-shimmer-line short"></div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -209,7 +299,7 @@ export default function Search({ cart, setCart }) {
         </div>
       )}
 
-      {!loading && results.length === 0 && query && (
+      {!loading && results.length === 0 && query && !showSuggestions && (
         <div className="sp-empty">
           <h3>No exact match found</h3>
           <p>Try searching with just the model code. Example: 9272</p>
@@ -218,3 +308,4 @@ export default function Search({ cart, setCart }) {
     </div>
   );
 }
+
