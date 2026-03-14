@@ -31,10 +31,10 @@ def ensure_model_loaded():
     """Trigger model loading if not already started."""
     global _model_loading
     
-    # Memory workaround: The 512MB RAM limit on many starter tiers is too small for SentenceTransformer. 
-    # Disable AI semantic matching on basic tiers to prevent OOM API crashes.
-    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") == "production":
-        print("Running in limited memory environment: Skipping heavy Semantic Model to save RAM.")
+    # Memory workaround: The 512MB RAM limit is too small for SentenceTransformer. 
+    # Detect Railway or Render to skip heavy AI model loading.
+    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT_NAME") or os.environ.get("RAILWAY_STATIC_URL"):
+        print("--- RAILWAY/RENDER DETECTED: SKIPPING HEAVY AI MODEL TO PREVENT OOM CRASH ---")
         return
 
     if model is None and not _model_loading:
