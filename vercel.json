@@ -1,11 +1,13 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/build",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "create-react-app",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "frontend/$1"
+      "destination": "/index.html"
     }
   ]
 }
