@@ -8,14 +8,15 @@ import shutil
 import os
 import json
 import time
-import smtplib
-import ssl
-from email.message import EmailMessage
+import re
+from datetime import datetime
 from urllib.parse import urlparse
 import httpx
 print("Importing custom modules...")
 from pdf_reader import extract_content, chunk_content
 import search_engine
+import cloud_storage
+from email_service import send_email_with_attachment
 from quotation import generate_quote
 print("Done with imports!")
 
@@ -61,6 +62,8 @@ def index_local_catalogs(force=False):
     print("--- BACKGROUND INDEXING START ---")
     search_engine.reset_index()  # Clean all stored data and AI vectors
 
+    _sync_cloud_catalogs_to_local()
+
     upload_dir = UPLOAD_DIR
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir)
@@ -104,6 +107,30 @@ def _normalize_whatsapp_number(raw_number: str) -> str:
         return digits
     return digits
 
+def _sanitize_filename(value: str, fallback: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._")
+    return cleaned or fallback
+
+def _parse_cloud_timestamp(raw_value):
+    if not raw_value:
+        return time.time()
+    text = str(raw_value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return time.time()
+
+def _read_remote_bytes(url: str) -> bytes:
+    try:
+        response = httpx.get(url, timeout=60)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch remote file: {e}")
+
+    if not response.is_success:
+        raise HTTPException(status_code=404, detail="Remote file not found")
+
+    return response.content
+
 def _resolve_static_pdf_path(pdf_url: str):
     if not pdf_url:
         raise HTTPException(status_code=400, detail="Missing pdf_url")
@@ -126,9 +153,148 @@ def _resolve_static_pdf_path(pdf_url: str):
 
     return abs_path, os.path.basename(abs_path), raw_path
 
+def _load_pdf_bytes(pdf_url: str, requested_name: str = ""):
+    if cloud_storage.is_absolute_url(pdf_url):
+        parsed = urlparse(pdf_url)
+        detected_name = os.path.basename(parsed.path) or "quotation.pdf"
+        return _read_remote_bytes(pdf_url), requested_name or detected_name
+
+    pdf_path, detected_name, _ = _resolve_static_pdf_path(pdf_url)
+    with open(pdf_path, "rb") as handle:
+        return handle.read(), requested_name or detected_name
+
+def _sync_cloud_catalogs_to_local():
+    if not cloud_storage.is_enabled():
+        return
+
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        remote_entries = [
+            entry for entry in cloud_storage.list_objects(cloud_storage.CATALOGS_BUCKET)
+            if str(entry.get("name") or "").lower().endswith(".pdf")
+        ]
+        remote_names = set()
+        for entry in remote_entries:
+            filename = str(entry.get("name") or "").strip()
+            if not filename:
+                continue
+
+            remote_names.add(filename)
+            local_path = os.path.join(UPLOAD_DIR, filename)
+            if not os.path.exists(local_path):
+                cloud_storage.download_to_path(cloud_storage.CATALOGS_BUCKET, filename, local_path)
+
+        for filename in os.listdir(UPLOAD_DIR):
+            if filename.lower().endswith(".pdf") and filename not in remote_names:
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, filename))
+                except OSError:
+                    pass
+    except Exception as e:
+        print(f"Warning: failed to sync cloud catalogs locally: {e}")
+
+def _save_quote_record(filename: str, data: dict):
+    os.makedirs(QUOTES_HISTORY_DIR, exist_ok=True)
+    local_path = os.path.join(QUOTES_HISTORY_DIR, filename)
+    with open(local_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.upload_bytes(
+                cloud_storage.QUOTE_HISTORY_BUCKET,
+                filename,
+                json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                "application/json",
+            )
+        except Exception as e:
+            print(f"Warning: failed to sync quote history to cloud: {e}")
+
+def _list_quote_records():
+    if cloud_storage.is_enabled():
+        try:
+            details = []
+            for entry in cloud_storage.list_objects(cloud_storage.QUOTE_HISTORY_BUCKET):
+                filename = str(entry.get("name") or "").strip()
+                if not filename.lower().endswith(".json"):
+                    continue
+
+                raw = cloud_storage.download_bytes(cloud_storage.QUOTE_HISTORY_BUCKET, filename)
+                if not raw:
+                    continue
+
+                content = json.loads(raw.decode("utf-8"))
+                details.append({
+                    "id": filename,
+                    "client": content.get("client_name", "N/A"),
+                    "total": content.get("grand_total", 0),
+                    "date": _parse_cloud_timestamp(entry.get("updated_at") or entry.get("created_at")),
+                })
+
+            details.sort(key=lambda item: item["date"], reverse=True)
+            return details
+        except Exception as e:
+            print(f"Warning: failed to list cloud quote history: {e}")
+
+    folder = QUOTES_HISTORY_DIR
+    if not os.path.exists(folder):
+        return []
+
+    files = [f for f in os.listdir(folder) if f.endswith(".json")]
+    details = []
+    for filename in files:
+        path = os.path.join(folder, filename)
+        stat = os.stat(path)
+        with open(path, "r", encoding="utf-8") as handle:
+            try:
+                content = json.load(handle)
+                details.append({
+                    "id": filename,
+                    "client": content.get("client_name", "N/A"),
+                    "total": content.get("grand_total", 0),
+                    "date": stat.st_mtime,
+                })
+            except Exception:
+                continue
+
+    details.sort(key=lambda item: item["date"], reverse=True)
+    return details
+
+def _load_quote_record(quote_id: str):
+    if cloud_storage.is_enabled():
+        try:
+            raw = cloud_storage.download_bytes(cloud_storage.QUOTE_HISTORY_BUCKET, quote_id)
+            if raw is not None:
+                return json.loads(raw.decode("utf-8"))
+        except Exception as e:
+            print(f"Warning: failed to load cloud quote '{quote_id}': {e}")
+
+    path = os.path.join(QUOTES_HISTORY_DIR, quote_id)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    return None
+
+def _delete_quote_record(quote_id: str) -> bool:
+    deleted = False
+    path = os.path.join(QUOTES_HISTORY_DIR, quote_id)
+    if os.path.exists(path):
+        os.remove(path)
+        deleted = True
+
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.delete_object(cloud_storage.QUOTE_HISTORY_BUCKET, quote_id)
+            deleted = True
+        except Exception as e:
+            print(f"Warning: failed to delete cloud quote '{quote_id}': {e}")
+
+    return deleted
+
 @app.on_event("startup")
 async def startup_event():
     import search_engine
+    _sync_cloud_catalogs_to_local()
     # Try to load existing index first
     if not search_engine.load_index():
         # Only index if no saved index found
@@ -164,30 +330,39 @@ def get_status():
 
 @app.post("/generate-quote")
 async def create_quote(data: dict):
-    # Save quotation data for history.
-    os.makedirs(QUOTES_HISTORY_DIR, exist_ok=True)
     timestamp = int(time.time())
-    client_slug = data.get("client_name", "Unknown").replace(" ", "_")
+    client_slug = _sanitize_filename(data.get("client_name", "Unknown"), "Unknown")
 
     # Auto-generate a readable quotation number: SC-YYYYMMDD-XXXX
-    from datetime import datetime
     date_str = datetime.now().strftime("%Y%m%d")
     seq = str(timestamp)[-4:]          # last 4 digits of unix timestamp
     quote_number = f"SC-{date_str}-{seq}"
     data["quote_number"] = quote_number
 
     filename = f"quote_{timestamp}_{client_slug}.json"
-    with open(os.path.join(QUOTES_HISTORY_DIR, filename), "w") as f:
-        json.dump(data, f)
+    _save_quote_record(filename, data)
 
     generate_quote(data)
 
-    # Keep a shareable static copy of the generated PDF for email/WhatsApp sending.
-    os.makedirs(STATIC_QUOTES_DIR, exist_ok=True)
     share_pdf_name = f"quote_{timestamp}_{client_slug}.pdf"
-    share_pdf_path = os.path.join(STATIC_QUOTES_DIR, share_pdf_name)
-    shutil.copyfile(QUOTATION_PDF_PATH, share_pdf_path)
-    share_pdf_url = f"/static/quotes/{share_pdf_name}"
+    share_pdf_url = ""
+
+    if cloud_storage.is_enabled():
+        try:
+            share_pdf_url = cloud_storage.upload_file(
+                cloud_storage.QUOTES_BUCKET,
+                share_pdf_name,
+                QUOTATION_PDF_PATH,
+                "application/pdf",
+            )
+        except Exception as e:
+            print(f"Warning: failed to sync quote PDF to cloud: {e}")
+
+    if not share_pdf_url:
+        os.makedirs(STATIC_QUOTES_DIR, exist_ok=True)
+        share_pdf_path = os.path.join(STATIC_QUOTES_DIR, share_pdf_name)
+        shutil.copyfile(QUOTATION_PDF_PATH, share_pdf_path)
+        share_pdf_url = f"/static/quotes/{share_pdf_name}"
 
     return FileResponse(
         QUOTATION_PDF_PATH,
@@ -211,47 +386,10 @@ async def send_quote_email(data: dict):
     if not to_email:
         raise HTTPException(status_code=400, detail="Recipient email is required")
 
-    pdf_path, detected_name, _ = _resolve_static_pdf_path(pdf_url)
-    pdf_name = requested_name or detected_name
-
-    smtp_host = os.getenv("SMTP_HOST", "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "").strip()
-    smtp_pass = os.getenv("SMTP_PASS", "").strip()
-    smtp_from = os.getenv("SMTP_FROM", smtp_user).strip()
-    smtp_ssl = _bool_env("SMTP_SSL", False)
-    smtp_starttls = _bool_env("SMTP_STARTTLS", True)
-
-    if not smtp_host:
-        raise HTTPException(status_code=500, detail="SMTP not configured: missing SMTP_HOST")
-    if not smtp_from:
-        raise HTTPException(status_code=500, detail="SMTP not configured: missing SMTP_FROM/SMTP_USER")
+    pdf_bytes, pdf_name = _load_pdf_bytes(pdf_url, requested_name)
 
     try:
-        msg = EmailMessage()
-        msg["From"] = smtp_from
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.set_content(body or "Please find your quotation attached.")
-
-        with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
-        msg.add_attachment(pdf_bytes, maintype="application", subtype="pdf", filename=pdf_name)
-
-        if smtp_ssl:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ssl.create_default_context(), timeout=30) as server:
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-                server.ehlo()
-                if smtp_starttls:
-                    server.starttls(context=ssl.create_default_context())
-                    server.ehlo()
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
+        send_email_with_attachment(to_email, subject, body, pdf_bytes, pdf_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Email send failed: {e}")
 
@@ -277,8 +415,7 @@ async def send_quote_whatsapp(data: dict):
             detail="WhatsApp API not configured: set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID",
         )
 
-    pdf_path, detected_name, _ = _resolve_static_pdf_path(pdf_url)
-    pdf_name = requested_name or detected_name
+    pdf_bytes, pdf_name = _load_pdf_bytes(pdf_url, requested_name)
 
     base_url = f"https://graph.facebook.com/v20.0/{phone_number_id}"
     auth_headers = {"Authorization": f"Bearer {token}"}
@@ -302,16 +439,15 @@ async def send_quote_whatsapp(data: dict):
                 raise HTTPException(status_code=500, detail=f"WhatsApp text send failed: {text_res.text}")
 
         # Upload document media.
-        with open(pdf_path, "rb") as f:
-            files = {"file": (pdf_name, f, "application/pdf")}
-            media_payload = {"messaging_product": "whatsapp", "type": "application/pdf"}
-            media_res = httpx.post(
-                f"{base_url}/media",
-                headers=auth_headers,
-                data=media_payload,
-                files=files,
-                timeout=60,
-            )
+        files = {"file": (pdf_name, pdf_bytes, "application/pdf")}
+        media_payload = {"messaging_product": "whatsapp", "type": "application/pdf"}
+        media_res = httpx.post(
+            f"{base_url}/media",
+            headers=auth_headers,
+            data=media_payload,
+            files=files,
+            timeout=60,
+        )
         if not media_res.is_success:
             raise HTTPException(status_code=500, detail=f"WhatsApp media upload failed: {media_res.text}")
 
@@ -365,40 +501,18 @@ async def send_quote_whatsapp(data: dict):
 
 @app.get("/list-quotes")
 def list_quotes():
-    folder = QUOTES_HISTORY_DIR
-    if not os.path.exists(folder):
-        return {"quotes": []}
-    files = [f for f in os.listdir(folder) if f.endswith(".json")]
-    details = []
-    for f in files:
-        path = os.path.join(folder, f)
-        stat = os.stat(path)
-        with open(path, "r") as jf:
-            try:
-                content = json.load(jf)
-                details.append({
-                    "id": f,
-                    "client": content.get("client_name", "N/A"),
-                    "total": content.get("grand_total", 0),
-                    "date": stat.st_mtime
-                })
-            except: continue
-    details.sort(key=lambda x: x["date"], reverse=True)
-    return {"quotes": details}
+    return {"quotes": _list_quote_records()}
 
 @app.get("/get-quote/{id}")
 def get_quote(id: str):
-    path = os.path.join(QUOTES_HISTORY_DIR, id)
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
+    record = _load_quote_record(id)
+    if record is not None:
+        return record
     raise HTTPException(status_code=404)
 
 @app.delete("/delete-quote/{id}")
 def delete_quote(id: str):
-    path = os.path.join(QUOTES_HISTORY_DIR, id)
-    if os.path.exists(path):
-        os.remove(path)
+    if _delete_quote_record(id):
         return {"message": "Deleted"}
     raise HTTPException(status_code=404)
 
@@ -437,13 +551,23 @@ async def add_manual_item(
     if file:
         dest_dir = os.path.join(STATIC_IMAGES_DIR, "manual")
         os.makedirs(dest_dir, exist_ok=True)
-        img_filename = f"manual_{int(time.time())}_{file.filename}"
+        img_filename = f"manual_{int(time.time())}_{_sanitize_filename(file.filename, 'image.jpg')}"
         dest_path = os.path.join(dest_dir, img_filename)
         
         with open(dest_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
         image_path = f"/static/images/manual/{img_filename}"
+        if cloud_storage.is_enabled():
+            try:
+                image_path = cloud_storage.upload_file(
+                    cloud_storage.PRODUCT_IMAGES_BUCKET,
+                    f"manual/{img_filename}",
+                    dest_path,
+                    cloud_storage.guess_content_type(img_filename, "image/jpeg"),
+                )
+            except Exception as e:
+                print(f"Warning: failed to sync manual image to cloud: {e}")
         
     new_item = {
         "text": f"{name}\nMRP : ` {price}/-",
@@ -481,18 +605,57 @@ def ask_question(q: str):
 async def upload_pdf(file: UploadFile = File(...)):
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-        path = os.path.join(UPLOAD_DIR, file.filename)
+        safe_name = _sanitize_filename(file.filename, "catalog.pdf")
+        path = os.path.join(UPLOAD_DIR, safe_name)
         content = await file.read()
         with open(path, "wb") as buffer:
             buffer.write(content)
-        # Run indexing in background — don't block the response
+
+        if cloud_storage.is_enabled():
+            try:
+                cloud_storage.upload_bytes(
+                    cloud_storage.CATALOGS_BUCKET,
+                    safe_name,
+                    content,
+                    "application/pdf",
+                )
+            except Exception as e:
+                print(f"Warning: failed to sync catalog to cloud: {e}")
+
+        # Run indexing in background - don't block the response
         threading.Thread(target=index_local_catalogs, args=(True,), daemon=True).start()
-        return {"message": f"'{file.filename}' uploaded! Indexing in background..."}
+        return {"message": f"'{safe_name}' uploaded! Indexing in background..."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-uploads")
 def list_uploads():
+    if cloud_storage.is_enabled():
+        try:
+            file_details = []
+            for entry in cloud_storage.list_objects(cloud_storage.CATALOGS_BUCKET):
+                filename = str(entry.get("name") or "").strip()
+                if not filename.lower().endswith(".pdf"):
+                    continue
+
+                metadata = entry.get("metadata") or {}
+                raw_size = metadata.get("size") or entry.get("size") or 0
+                try:
+                    size_mb = round(int(raw_size) / (1024 * 1024), 2)
+                except Exception:
+                    size_mb = 0
+
+                file_details.append({
+                    "name": filename,
+                    "size": size_mb,
+                    "date": _parse_cloud_timestamp(entry.get("updated_at") or entry.get("created_at")),
+                })
+
+            file_details.sort(key=lambda item: item["date"], reverse=True)
+            return {"files": file_details}
+        except Exception as e:
+            print(f"Warning: failed to list cloud uploads: {e}")
+
     upload_dir = UPLOAD_DIR
     if not os.path.exists(upload_dir):
         return {"files": []}
@@ -514,8 +677,19 @@ def list_uploads():
 @app.delete("/delete-upload/{filename}")
 def delete_upload(filename: str):
     path = os.path.join(UPLOAD_DIR, filename)
+    deleted = False
     if os.path.exists(path):
         os.remove(path)
+        deleted = True
+
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.delete_object(cloud_storage.CATALOGS_BUCKET, filename)
+            deleted = True
+        except Exception as e:
+            print(f"Warning: failed to delete cloud upload '{filename}': {e}")
+
+    if deleted:
         # Re-index in background after deletion
         threading.Thread(target=index_local_catalogs, args=(True,), daemon=True).start()
         return {"message": f"'{filename}' deleted and system re-indexed."}
@@ -524,21 +698,32 @@ def delete_upload(filename: str):
 @app.post("/rename-upload")
 def rename_upload(data: dict):
     old_name = data.get("old_name")
-    new_name = data.get("new_name")
+    new_name = _sanitize_filename(data.get("new_name"), "")
     
     if not old_name or not new_name:
         raise HTTPException(status_code=400, detail="Missing names")
         
     old_path = os.path.join(UPLOAD_DIR, old_name)
     new_path = os.path.join(UPLOAD_DIR, new_name)
-    
-    if not os.path.exists(old_path):
-        raise HTTPException(status_code=404, detail="Original file not found")
-        
+
     if os.path.exists(new_path):
         raise HTTPException(status_code=400, detail="New filename already exists")
-        
-    os.rename(old_path, new_path)
+
+    renamed = False
+    if os.path.exists(old_path):
+        os.rename(old_path, new_path)
+        renamed = True
+
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.move_object(cloud_storage.CATALOGS_BUCKET, old_name, new_name)
+            renamed = True
+        except Exception as e:
+            print(f"Warning: failed to rename cloud upload '{old_name}' -> '{new_name}': {e}")
+
+    if not renamed:
+        raise HTTPException(status_code=404, detail="Original file not found")
+
     # Re-index in background after rename
     threading.Thread(target=index_local_catalogs, args=(True,), daemon=True).start()
     return {"message": f"Renamed to {new_name}"}

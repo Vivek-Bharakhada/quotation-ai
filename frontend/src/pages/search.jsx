@@ -4,6 +4,7 @@ import './search.css';
 
 import BASE from '../api';
 import { readJson, writeJson } from '../utils/storage';
+import { resolveAssetUrl } from '../utils/url';
 
 const SEARCH_UI_KEY = 'quotation-ai/search-ui';
 const SEARCH_CACHE_KEY = 'quotation-ai/search-cache';
@@ -326,7 +327,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
               >
                 <div className="sp-sugg-left">
                   {s.image ? (
-                    <img src={`${BASE}${s.image}`} alt="" className="sp-sugg-img" />
+                    <img src={resolveAssetUrl(s.image)} alt="" className="sp-sugg-img" />
                   ) : (
                     <div className="sp-sugg-no-img">NO IMG</div>
                   )}
@@ -366,7 +367,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
           
           const added = isInCart(`${r.text}-${currentVariant}`);
           const title = r.text.split('\n')[0].substring(0, 100);
-          const imageCandidates = (r.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
+          const imageCandidates = (r.images || []).filter(Boolean).map(resolveAssetUrl);
           const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
           const hasImage = imageSrc && !failedImages[imageSrc];
 

@@ -4,6 +4,7 @@ import './quotation.css';
 
 import BASE from '../api';
 import { readJson, writeJson } from '../utils/storage';
+import { resolveAssetUrl } from '../utils/url';
 
 const QUOTE_DRAFT_KEY = 'quotation-ai/quote-draft';
 const QUOTE_HISTORY_CACHE_KEY = 'quotation-ai/quote-history-cache';
@@ -429,7 +430,7 @@ export default function Quotation({ cart }) {
       const serverPath = response.headers['x-quote-file-url'] || '';
       const serverName = response.headers['x-quote-file-name'] || '';
       const qNum = response.headers['x-quote-number'] || '';
-      const serverUrl = serverPath ? `${BASE}${serverPath}` : '';
+      const serverUrl = serverPath ? resolveAssetUrl(serverPath) : '';
       setGeneratedPdfServerUrl(serverUrl);
       setGeneratedPdfServerName(serverName || '');
       setQuoteNumber(qNum);
@@ -711,7 +712,7 @@ export default function Quotation({ cart }) {
               <div className="qt-item-grid">
                 <div className="qt-thumb">
                   {item.image ? (
-                    <img src={`${BASE}${item.image}`} alt="thumb" />
+                    <img src={resolveAssetUrl(item.image)} alt="thumb" />
                   ) : (
                     <div className="qt-no-thumb">NO IMG</div>
                   )}

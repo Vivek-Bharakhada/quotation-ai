@@ -3,6 +3,8 @@ import os
 import re
 import hashlib
 
+import cloud_storage
+
 
 def clean_text(text):
     """Clean PDF-extracted text: fix encodings, spaces, and word boundaries."""
@@ -758,7 +760,19 @@ def extract_content(pdf_path, max_pages=None):
                     pix.save(img_path)
                     pix = None
 
-                img_records.append({"path": f"/static/images/{img_filename}", "rect": rect})
+                public_path = f"/static/images/{img_filename}"
+                if cloud_storage.is_enabled():
+                    try:
+                        public_path = cloud_storage.upload_file(
+                            cloud_storage.PRODUCT_IMAGES_BUCKET,
+                            f"catalog/{img_filename}",
+                            img_path,
+                            "image/jpeg",
+                        )
+                    except Exception:
+                        public_path = f"/static/images/{img_filename}"
+
+                img_records.append({"path": public_path, "rect": rect})
             except Exception:
                 continue
 
@@ -784,7 +798,19 @@ def extract_content(pdf_path, max_pages=None):
                         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=rect, alpha=False)
                         pix.save(img_path)
                         pix = None
-                    img_records.append({"path": f"/static/images/{img_filename}", "rect": rect})
+                    public_path = f"/static/images/{img_filename}"
+                    if cloud_storage.is_enabled():
+                        try:
+                            public_path = cloud_storage.upload_file(
+                                cloud_storage.PRODUCT_IMAGES_BUCKET,
+                                f"catalog/{img_filename}",
+                                img_path,
+                                "image/jpeg",
+                            )
+                        except Exception:
+                            public_path = f"/static/images/{img_filename}"
+
+                    img_records.append({"path": public_path, "rect": rect})
         except Exception:
             pass
         def map_kohler_category(text):

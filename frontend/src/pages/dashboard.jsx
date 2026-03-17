@@ -3,6 +3,7 @@ import axios from 'axios';
 import './dashboard.css';
 
 import BASE from '../api';
+import { resolveAssetUrl } from '../utils/url';
 
 const uniqueIndexTitles = (items) => {
   const seen = new Set();
@@ -468,7 +469,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                       const displayPrice = (item.variant_prices && currentVariant && item.variant_prices[currentVariant]) || item.price;
                       
                       const alreadyAdded = cart.some(row => row.id === productCartId(item, currentVariant));
-                      const imageCandidates = (item.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
+                      const imageCandidates = (item.images || []).filter(Boolean).map(resolveAssetUrl);
                       const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
                       const hasImage = imageSrc && !failedImages[imageSrc];
 

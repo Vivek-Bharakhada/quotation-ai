@@ -1,7 +1,6 @@
 import axios from "axios";
 import { useState } from "react";
-
-const BASE = "http://127.0.0.1:8000";
+import BASE from "../api";
 
 export default function Upload() {
   const [file, setFile] = useState(null);

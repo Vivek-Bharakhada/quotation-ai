@@ -4,6 +4,8 @@ import os
 import json
 import threading
 
+import cloud_storage
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Lazy model loading - loads in background to avoid blocking app startup
@@ -66,6 +68,7 @@ catalog_summary_cache = None # Saved dashboard index
 
 
 INDEX_FILE = os.path.join(BASE_DIR, "search_index_v2.json")
+SEARCH_INDEX_OBJECT_PATH = os.getenv("SUPABASE_SEARCH_INDEX_PATH", "search/search_index_v2.json")
 
 def save_index():
     global stored_items, keyword_index
@@ -77,8 +80,32 @@ def save_index():
         json.dump(data, f)
     print(f"Index saved to {INDEX_FILE}")
 
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.upload_file(
+                cloud_storage.SYSTEM_BUCKET,
+                SEARCH_INDEX_OBJECT_PATH,
+                INDEX_FILE,
+                "application/json",
+            )
+            print("Index synced to cloud storage.")
+        except Exception as e:
+            print(f"Warning: failed to sync index to cloud storage: {e}")
+
 def load_index():
     global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache
+    if not os.path.exists(INDEX_FILE) and cloud_storage.is_enabled():
+        try:
+            restored = cloud_storage.download_to_path(
+                cloud_storage.SYSTEM_BUCKET,
+                SEARCH_INDEX_OBJECT_PATH,
+                INDEX_FILE,
+            )
+            if restored:
+                print("Restored search index from cloud storage.")
+        except Exception as e:
+            print(f"Warning: failed to restore index from cloud storage: {e}")
+
     if os.path.exists(INDEX_FILE):
         try:
             with open(INDEX_FILE, "r", encoding="utf-8") as f:
@@ -131,6 +158,11 @@ def reset_index():
     catalog_summary_cache = None
     if os.path.exists(INDEX_FILE):
         os.remove(INDEX_FILE)
+    if cloud_storage.is_enabled():
+        try:
+            cloud_storage.delete_object(cloud_storage.SYSTEM_BUCKET, SEARCH_INDEX_OBJECT_PATH)
+        except Exception as e:
+            print(f"Warning: failed to delete cloud search index: {e}")
 
 
 def _normalize(text, strip_in=False):
@@ -805,5 +837,4 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         })
         
     return final_results
-
 
