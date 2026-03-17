@@ -303,6 +303,16 @@ async def startup_event():
         print("Using saved search index.")
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "quotation-ai-backend",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/status",
+    }
+
+
 @app.get("/refresh")
 async def refresh_catalogs():
     threading.Thread(target=index_local_catalogs, args=(True,), daemon=True).start()
