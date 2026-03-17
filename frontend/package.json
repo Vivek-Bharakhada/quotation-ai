@@ -2,7 +2,12 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "description": "Shreeji Ceramica Quotation AI frontend, PWA, desktop, and mobile shell",
+  "homepage": ".",
+  "main": "electron/main.js",
   "dependencies": {
+    "@capacitor/android": "^7.6.0",
+    "@capacitor/ios": "^7.6.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -16,8 +21,19 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:app": "cmd /c \"set BUILD_PATH=build_app&& react-scripts build\"",
+    "desktop:start": "electron .",
+    "desktop:dev": "set ELECTRON_START_URL=http://localhost:3000&& electron .",
+    "mobile:sync": "npx cap sync",
+    "mobile:open:android": "npx cap open android",
+    "mobile:open:ios": "npx cap open ios",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.1",
+    "@capacitor/core": "^7.0.1",
+    "electron": "^35.0.0"
   },
   "eslintConfig": {
     "extends": [

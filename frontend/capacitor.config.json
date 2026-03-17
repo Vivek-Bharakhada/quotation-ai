@@ -1,0 +1,9 @@
+{
+  "appId": "com.shreejiceramica.quotationai",
+  "appName": "Shreeji Quotation AI",
+  "webDir": "build_app",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

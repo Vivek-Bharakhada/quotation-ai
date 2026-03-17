@@ -191,7 +191,7 @@ def _is_code_or_model_query(query: str) -> bool:
         return True
     numeric_tokens = [tok for tok in tokens if re.fullmatch(r'\d{3,}', tok)]
     if numeric_tokens:
-        known_brands = {"kohler", "aquant"}
+        known_brands = {"kohler", "aquant", "plumber"}
         if len(tokens) <= 3 and any(tok in known_brands for tok in tokens):
             return True
 
@@ -287,6 +287,8 @@ def _item_brand(item):
         return "kohler"
     if "aquant" in source:
         return "aquant"
+    if "plumber" in source:
+        return "plumber"
     return ""
 
 def add_to_index(_unused_embeddings, items):
@@ -636,7 +638,7 @@ def search(query: str, smart: bool = False, brand: str = None):
             b = _item_brand(item) or "generic"
             buckets.setdefault(b, []).append(item)
 
-        ordered_brands = [b for b in ("aquant", "kohler") if b in buckets]
+        ordered_brands = [b for b in ("aquant", "kohler", "plumber") if b in buckets]
         ordered_brands.extend([b for b in buckets.keys() if b not in ordered_brands])
 
         mixed_items = []
@@ -683,7 +685,7 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
     if brand_lower and brand_lower != "all":
         target_brands = [brand_lower]
     else:
-        target_brands = [b for b in ("aquant", "kohler") if any(_item_brand(item) == b for item in stored_items)]
+        target_brands = [b for b in ("aquant", "kohler", "plumber") if any(_item_brand(item) == b for item in stored_items)]
         if not target_brands:
             target_brands = [""]
 
@@ -724,7 +726,7 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
     return unique_res
 
 
-def get_suggestions(query: str, limit: int = 10):
+def get_suggestions(query: str, limit: int = 10, brand: str = None):
     if not query or len(query.strip()) < 2:
         return []
 
@@ -746,9 +748,17 @@ def get_suggestions(query: str, limit: int = 10):
     suggestions = []
     seen = set()
 
+    brand_lower = (brand or "").strip().lower()
+    is_all_brand = (not brand_lower) or (brand_lower == "all")
+
     # Score and rank candidates
     for idx in potential_indices:
         item = stored_items[idx]
+        
+        if not is_all_brand:
+            if _item_brand(item) != brand_lower:
+                continue
+
         name = item.get("name", "")
         if not name: continue
         

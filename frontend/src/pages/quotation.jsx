@@ -3,46 +3,102 @@ import axios from 'axios';
 import './quotation.css';
 
 import BASE from '../api';
+import { readJson, writeJson } from '../utils/storage';
+
+const QUOTE_DRAFT_KEY = 'quotation-ai/quote-draft';
+const QUOTE_HISTORY_CACHE_KEY = 'quotation-ai/quote-history-cache';
+
+const blankClient = {
+  client_name: '',
+  mobile: '',
+  email: '',
+  company: '',
+  gst: '',
+  address: '',
+};
+
+const createBlankItem = () => ({
+  name: '',
+  room: '',
+  price: '',
+  quantity: 1,
+  discount: 0,
+  image: null,
+  rawText: '',
+  sku: '',
+  size: '',
+});
+
+const mapCartToItems = (cart = []) =>
+  cart && cart.length > 0
+    ? cart.map((item) => ({
+        name: item.name,
+        price: item.price || '0',
+        quantity: 1,
+        discount: 0,
+        image: item.image || null,
+        room: item.category || item.room || '',
+        rawText: item.rawText || '',
+        sku: item.sku || '',
+        size: item.size || '',
+      }))
+    : [createBlankItem()];
+
+const loadStoredDraft = () => {
+  const stored = readJson(QUOTE_DRAFT_KEY, null);
+  return stored && typeof stored === 'object' ? stored : null;
+};
+
+const normalizeQuoteHistory = (value) => (Array.isArray(value) ? value : []);
+
+async function notifyQuoteReady(quoteNumber, grandTotal) {
+  if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') {
+    return;
+  }
+
+  const numericTotal = Number(grandTotal || 0);
+  const title = quoteNumber ? `Quotation ${quoteNumber} ready` : 'Quotation ready';
+  const body = Number.isFinite(numericTotal) && numericTotal > 0
+    ? `PDF generated successfully. Grand total: Rs ${numericTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+    : 'Your quotation PDF is ready to view and share.';
+
+  if ('serviceWorker' in navigator) {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration) {
+      registration.showNotification(title, {
+        body,
+        icon: '/logo192.png',
+        badge: '/logo192.png',
+      });
+      return;
+    }
+  }
+
+  new Notification(title, { body, icon: '/logo192.png' });
+}
 
 
 export default function Quotation({ cart }) {
-  const [client, setClient] = useState({
-    client_name: '',
-    mobile: '',
-    email: '',
-    company: '',
-    gst: '',
-    address: '',
-  });
-
-  const [showGstInput, setShowGstInput] = useState(false);
-
-  const [items, setItems] = useState(
-    cart && cart.length > 0
-      ? cart.map((c) => ({
-        name: c.name,
-        price: c.price || '0',
-        quantity: 1,
-        discount: 0,
-        image: c.image || null,
-        room: c.category || c.room || '',
-        rawText: c.rawText || '',
-      }))
-      : [{ name: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]
+  const storedDraft = loadStoredDraft();
+  const [client, setClient] = useState(() => storedDraft?.client || blankClient);
+  const [showGstInput, setShowGstInput] = useState(() => Boolean(storedDraft?.showGstInput || storedDraft?.client?.gst));
+  const [items, setItems] = useState(() => storedDraft?.items?.length ? storedDraft.items : mapCartToItems(cart));
+  const [discountPercent, setDiscountPercent] = useState(() => storedDraft?.discountPercent ?? 0);
+  const [gstRate, setGstRate] = useState(() => storedDraft?.gstRate ?? 18);
+  const [quoteHistory, setQuoteHistory] = useState(() => normalizeQuoteHistory(readJson(QUOTE_HISTORY_CACHE_KEY, [])));
+  const [generatedPdfUrl, setGeneratedPdfUrl] = useState(() => storedDraft?.generatedPdfServerUrl || null);
+  const [generatedPdfServerUrl, setGeneratedPdfServerUrl] = useState(() => storedDraft?.generatedPdfServerUrl || '');
+  const [generatedPdfServerName, setGeneratedPdfServerName] = useState(() => storedDraft?.generatedPdfServerName || '');
+  const [quoteNumber, setQuoteNumber] = useState(() => storedDraft?.quoteNumber || '');
+  const [quoteDate, setQuoteDate] = useState(() => storedDraft?.quoteDate || '');
+  const [showBgLogo, setShowBgLogo] = useState(() => Boolean(storedDraft?.showBgLogo));
+  const [madeBy, setMadeBy] = useState(() => storedDraft?.madeBy || '');
+  const [madeByPhone, setMadeByPhone] = useState(() => storedDraft?.madeByPhone || '');
+  const [madeByEmail, setMadeByEmail] = useState(() => storedDraft?.madeByEmail || '');
+  const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine));
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
-
-  const [discountPercent, setDiscountPercent] = useState(0);
-  const [gstRate, setGstRate] = useState(18);
-  const [quoteHistory, setQuoteHistory] = useState([]);
-  const [generatedPdfUrl, setGeneratedPdfUrl] = useState(null);
-  const [generatedPdfServerUrl, setGeneratedPdfServerUrl] = useState('');
-  const [generatedPdfServerName, setGeneratedPdfServerName] = useState('');
-  const [quoteNumber, setQuoteNumber] = useState('');
-  const [quoteDate, setQuoteDate] = useState('');
-  const [showBgLogo, setShowBgLogo] = useState(false);
-  const [madeBy, setMadeBy] = useState('');
-  const [madeByPhone, setMadeByPhone] = useState('');
-  const [madeByEmail, setMadeByEmail] = useState('');
 
   const staffOptions = [
     { name: 'Harsh Bhai', phone: '+91 82385 21277' },
@@ -67,15 +123,93 @@ export default function Quotation({ cart }) {
   const fetchHistory = async () => {
     try {
       const res = await axios.get(`${BASE}/list-quotes`);
-      setQuoteHistory(res.data.quotes || []);
+      const normalized = res.data.quotes || [];
+      setQuoteHistory(normalized);
+      writeJson(QUOTE_HISTORY_CACHE_KEY, normalized);
     } catch (err) {
       console.error('Failed to fetch history', err);
+      setQuoteHistory(normalizeQuoteHistory(readJson(QUOTE_HISTORY_CACHE_KEY, [])));
     }
   };
 
   useEffect(() => {
     fetchHistory();
   }, []);
+
+  useEffect(() => {
+    writeJson(QUOTE_DRAFT_KEY, {
+      client,
+      showGstInput,
+      items,
+      discountPercent,
+      gstRate,
+      generatedPdfServerUrl,
+      generatedPdfServerName,
+      quoteNumber,
+      quoteDate,
+      showBgLogo,
+      madeBy,
+      madeByPhone,
+      madeByEmail,
+    });
+  }, [
+    client,
+    showGstInput,
+    items,
+    discountPercent,
+    gstRate,
+    generatedPdfServerUrl,
+    generatedPdfServerName,
+    quoteNumber,
+    quoteDate,
+    showBgLogo,
+    madeBy,
+    madeByPhone,
+    madeByEmail,
+  ]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      return;
+    }
+
+    setItems((previousItems) => {
+      const isBlankDraft =
+        previousItems.length === 1 &&
+        !previousItems[0].name &&
+        !previousItems[0].price &&
+        !previousItems[0].rawText;
+
+      return isBlankDraft ? mapCartToItems(cart) : previousItems;
+    });
+  }, [cart]);
+
+  const requestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      alert('Notifications are not supported on this device/browser.');
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+
+    if (permission === 'granted') {
+      alert('Notifications enabled. You will get an alert when the quotation PDF is generated.');
+    }
+  };
 
   const loadQuote = async (id) => {
     try {
@@ -93,6 +227,11 @@ export default function Quotation({ cart }) {
       setDiscountPercent(data.discount_percent || 0);
       setGstRate(data.gst_rate || 18);
       if (data.gst) setShowGstInput(true);
+      setGeneratedPdfUrl(null);
+      setGeneratedPdfServerUrl('');
+      setGeneratedPdfServerName('');
+      setQuoteNumber(data.quote_number || '');
+      setQuoteDate('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       alert('Failed to load quotation');
@@ -120,7 +259,7 @@ export default function Quotation({ cart }) {
   };
 
   const addItem = () => {
-    setItems([...items, { name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]);
+    setItems([...items, createBlankItem()]);
   };
 
   const removeItem = (index) => {
@@ -128,8 +267,29 @@ export default function Quotation({ cart }) {
     setItems(
       newItems.length > 0
         ? newItems
-        : [{ name: '', room: '', price: '', quantity: 1, discount: 0, image: null, rawText: '', sku: '', size: '' }]
+        : [createBlankItem()]
     );
+  };
+
+  const startFreshDraft = () => {
+    if (!window.confirm('Start a fresh quotation draft?')) {
+      return;
+    }
+
+    setClient(blankClient);
+    setShowGstInput(false);
+    setItems(mapCartToItems(cart));
+    setDiscountPercent(0);
+    setGstRate(18);
+    setGeneratedPdfUrl(null);
+    setGeneratedPdfServerUrl('');
+    setGeneratedPdfServerName('');
+    setQuoteNumber('');
+    setQuoteDate('');
+    setShowBgLogo(false);
+    setMadeBy('');
+    setMadeByPhone('');
+    setMadeByEmail('');
   };
 
   const subtotal = items.reduce((sum, item) => {
@@ -241,6 +401,11 @@ export default function Quotation({ cart }) {
   };
 
   const generatePDF = async () => {
+    if (isOffline) {
+      alert('You are offline. Please reconnect to generate a fresh PDF from the backend.');
+      return;
+    }
+
     try {
       const payload = {
         ...client,
@@ -264,12 +429,15 @@ export default function Quotation({ cart }) {
       const serverPath = response.headers['x-quote-file-url'] || '';
       const serverName = response.headers['x-quote-file-name'] || '';
       const qNum = response.headers['x-quote-number'] || '';
-      setGeneratedPdfServerUrl(serverPath ? `${BASE}${serverPath}` : '');
+      const serverUrl = serverPath ? `${BASE}${serverPath}` : '';
+      setGeneratedPdfServerUrl(serverUrl);
       setGeneratedPdfServerName(serverName || '');
       setQuoteNumber(qNum);
       const today = new Date();
-      setQuoteDate(today.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }));
+      const formattedDate = today.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+      setQuoteDate(formattedDate);
       fetchHistory();
+      await notifyQuoteReady(qNum, grandTotal);
     } catch (error) {
       console.error('Error generating PDF', error);
       alert('Failed to generate PDF');
@@ -453,8 +621,24 @@ export default function Quotation({ cart }) {
   return (
     <div className="qt-root">
       <header className="qt-header">
-        <h2>Create New Quotation</h2>
+        <div className="qt-header-row">
+          <div>
+            <h2>Create New Quotation</h2>
+            <p className="qt-header-note">Draft auto-saves locally, so you can continue on refresh or app reopen.</p>
+          </div>
+          <button className="qt-reset-btn" onClick={startFreshDraft}>
+            Start Fresh
+          </button>
+        </div>
       </header>
+
+      {(isOffline || generatedPdfServerUrl || notificationPermission === 'granted') && (
+        <div className={`qt-status-banner ${isOffline ? 'offline' : 'info'}`}>
+          {isOffline && <span>Offline mode active. Draft editing works, but fresh PDF generation needs internet.</span>}
+          {!isOffline && generatedPdfServerUrl && <span>Latest PDF link saved. You can reopen and share it later.</span>}
+          {notificationPermission === 'granted' && <span>Notifications enabled for PDF-ready alerts.</span>}
+        </div>
+      )}
 
       <section className="qt-client-grid">
         <input
@@ -644,6 +828,13 @@ export default function Quotation({ cart }) {
             <span className="qt-bg-logo-icon">🏢</span>
             Include Shreeji Office Branding (Letterhead)
           </label>
+          <button
+            type="button"
+            className={`qt-notify-btn ${notificationPermission === 'granted' ? 'enabled' : ''}`}
+            onClick={requestNotificationPermission}
+          >
+            {notificationPermission === 'granted' ? 'Notifications Enabled' : 'Enable Notifications'}
+          </button>
         </div>
 
         <div className="qt-madeby-section">

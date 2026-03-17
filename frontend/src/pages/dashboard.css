@@ -38,6 +38,13 @@
   --db-cool-soft: rgba(190, 30, 45, 0.14);
 }
 
+.db-root.brand-plumber {
+  --db-strip: rgba(5, 150, 105, 0.62);
+  --db-glow: rgba(5, 150, 105, 0.28);
+  --db-accent-soft: rgba(5, 150, 105, 0.26);
+  --db-cool-soft: rgba(37, 99, 235, 0.14);
+}
+
 .dark-theme .db-root {
   border-color: rgba(51, 65, 85, 0.62);
   background: linear-gradient(156deg, rgba(15, 23, 42, 0.7) 0%, rgba(10, 17, 31, 0.56) 100%);
@@ -657,10 +664,53 @@
   gap: 0.6rem;
 }
 
+.db-product-price-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
 .db-product-footer span {
   color: var(--primary-color);
   font-weight: 900;
   font-size: 0.96rem;
+}
+
+.db-variant-tag {
+  font-size: 0.68rem !important;
+  color: var(--text-dim) !important;
+  font-weight: 800 !important;
+  text-transform: uppercase;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border-color);
+}
+
+.db-variant-selector {
+  margin-bottom: 0.6rem;
+}
+
+.db-variant-select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  transition: all 0.2s ease;
+}
+
+.db-variant-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
 }
 
 .db-card-btn {

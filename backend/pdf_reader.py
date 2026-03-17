@@ -29,7 +29,7 @@ def clean_text(text):
 
 
 PRICE_PATTERNS = (
-    re.compile(r'(?:MRP|₹|`)\s*[:.]?\s*`?\s*([\d][\d,]*(?:\.\d+)?)', re.IGNORECASE),
+    re.compile(r'(?:MRP(?:\s+Per\s+Unit)?|₹|`)\s*[:.]?\s*`?\s*([\d][\d,]*(?:\.\d+)?)', re.IGNORECASE),
     re.compile(r'`\s*([\d][\d,]*(?:\.\d+)?)', re.IGNORECASE),
     re.compile(r'^\s*([\d]{1,3}(?:,\d{2,3})+)\s*$', re.IGNORECASE),
 )
@@ -117,6 +117,21 @@ FINISH_CODE_LABELS = {
     "TCR": "Terracotta Red",
     "W": "White",
     "G": "Gold",
+    # Plumber Finishes
+    "CP": "Chrome Plated",
+    "CB": "Chrome Black",
+    "CGY": "Chrome Grey",
+    "CW": "Chrome White",
+    "BCK": "Matt Black",
+    "WTE": "Matt White",
+    "GRY": "Matt Grey",
+    "BCG": "Black Champagne Gold",
+    "BRG": "Black Rose Gold",
+    "WCG": "White Champagne Gold",
+    "WRG": "White Rose Gold",
+    "CNG": "Champagne Gold",
+    "RGD": "Rose Gold",
+    "GM": "Gun Metal",
 }
 
 AQUANT_FINISH_IMAGE_VARIANT_ORDER = ("BRG", "GG", "RG", "BG", "MB", "CP", "MI", "MG", "TCR", "OG", "SB", "RB", "G", "SSF", "AB", "AC", "BC", "ORB", "AN", "SN")
@@ -704,7 +719,7 @@ def extract_content(pdf_path, max_pages=None):
     if max_pages: num_pages = min(num_pages, max_pages)
 
     current_category = None
-    brand = "Aquant" if "aquant" in pdf_name.lower() else "Kohler" if "kohler" in pdf_name.lower() else "Generic"
+    brand = "Aquant" if "aquant" in pdf_name.lower() else "Kohler" if "kohler" in pdf_name.lower() else "Plumber" if "plumber" in pdf_name.lower() else "Generic"
 
     for page_num in range(num_pages):
         page = doc[page_num]
@@ -809,8 +824,21 @@ def extract_content(pdf_path, max_pages=None):
             
             return None
 
+        def map_plumber_category(text):
+            t = text.upper().strip()
+            if "EXOTICA" in t:
+                return t.replace("EXOTICA", "").strip().title()
+            if "SHOWERS" in t: return "Showers"
+            if "ACCESSORIES" in t: return "Accessories"
+            if "THERMOSTATIC" in t: return "Thermostatic Mixers"
+            if "UNIVERSAL ITEMS" in t: return "Universal Items"
+            if "FAUCETS COLLECTION" in t: return "Faucets"
+            return None
+
         # Kohler model codes are consistently hyphenated (e.g. K-1063956, K-24149IN-F-BN).
         kohler_code_re = re.compile(r'\bK\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*\b', re.IGNORECASE)
+        # Plumber codes like DUN-1101, U-0901, BZA-1904C
+        plumber_code_re = re.compile(r'\b[A-Z]{1,4}\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*\b', re.IGNORECASE)
 
         def normalize_kohler_code(raw):
             return re.sub(r'\s+', '', str(raw or '')).upper()
@@ -876,14 +904,32 @@ def extract_content(pdf_path, max_pages=None):
                                 
                         img_path = img_records[best_img_idx]["path"] if best_img_idx != -1 else ""
                         
-                        prod_name = last_name + " - " + text.split('\n')[0][:100] if last_name else text.split('\n')[0][:100]
+                        code = normalize_kohler_code(code_match.group(0))
+                        
+                        # Clean up text lines for description
+                        raw_lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
+                        desc_lines = [ln for ln in raw_lines if code.upper() not in ln.upper() and 'MRP' not in ln.upper() and '(INCL' not in ln.upper()]
+                        primary_desc = desc_lines[0] if desc_lines else ""
+                        
+                        # Build a proper display name: [CODE] - [DESCRIPTION]
+                        if last_name:
+                            prod_name = f"{code} - {last_name} {primary_desc}".strip(" -")
+                        else:
+                            prod_name = f"{code} - {primary_desc}".strip(" -")
+                            
                         if current_category == "Cleaning Solutions":
                             inferred_category = "Cleaning Solutions"
                         else:
                             inferred_category = map_kohler_category(f"{last_name} {text}") or current_category or "Uncategorized"
                             
+                        # Clean up the text block for display
+                        display_lines = [prod_name]
+                        if len(desc_lines) > 1:
+                            display_lines.extend(desc_lines[1:])
+                        display_lines.append(f"MRP : ` {price}/-")
+                        
                         page_items.append({
-                            "text": text,
+                            "text": "\n".join(display_lines),
                             "name": prod_name,
                             "price": price,
                             "page": page_num + 1,
@@ -1169,6 +1215,120 @@ def extract_content(pdf_path, max_pages=None):
 
             content_list.extend(page_items)
             continue  # Skip Aquant extraction for this page
+
+        if brand == "Plumber":
+            blocks = page.get_text("blocks")
+            blocks.sort(key=lambda b: (b[1], b[0]))
+            
+            # ── Finish Header Detection ──
+            finish_labels = ["CP"] 
+            potential_header_texts = []
+            for b in blocks:
+                if b[6] != 0: continue
+                if b[1] < 280: # Headers are usually at the top
+                    potential_header_texts.append(b[4].strip())
+            
+            full_header = "\n".join(potential_header_texts)
+            if "CP" in full_header.upper():
+                lines = [l.strip() for l in full_header.split('\n') if l.strip()]
+                labels = []
+                found_cp = False
+                for l in lines:
+                    lu = l.upper()
+                    if "CAT" in lu or "ITEM" in lu or "M.R.P." in lu or "UNIT" in lu or "PRICE" in lu: 
+                        if found_cp: break 
+                        continue
+                    if "CP" in lu: found_cp = True
+                    if found_cp:
+                        # Clean up label (remove weird characters)
+                        lbl = l.strip(" .,|")
+                        if lbl: labels.append(lbl)
+                if labels:
+                    finish_labels = labels
+
+            page_items = []
+            for b in blocks:
+                if b[6] != 0: continue
+                text = b[4].strip()
+                if not text: continue
+                
+                # ── Category Detection ──
+                if b[1] < 150:
+                    mapped = map_plumber_category(text)
+                    if mapped:
+                        current_category = mapped
+                        continue
+                
+                # Check if block starts with a product code
+                code_match = plumber_code_re.match(text)
+                if code_match:
+                    code = code_match.group(0).upper()
+                    lines = [l.strip() for l in text.split('\n') if l.strip()]
+                    
+                    desc_parts = []
+                    prices = []
+                    
+                    for i, ln in enumerate(lines):
+                        if i == 0:
+                            rem = ln[len(code):].strip()
+                            if rem: desc_parts.append(rem)
+                        elif i < 6 and not any(c.isdigit() for c in ln[:3]): 
+                             desc_parts.append(ln)
+                        else:
+                             # Extract all numbers of 3-5 digits as prices
+                             pms = re.findall(r'(\d{3,5})', ln)
+                             for p in pms:
+                                 prices.append(p)
+                    
+                    primary_price = prices[0] if prices else "0"
+                    description = " ".join(desc_parts[:5]) 
+                    prod_full_name = f"{code} - {description}".strip(" -")
+                    
+                    # Map collected prices to finish labels
+                    variant_prices = {}
+                    for i, p_val in enumerate(prices):
+                        if i < len(finish_labels):
+                            label = finish_labels[i]
+                            variant_prices[label] = p_val
+                        elif i == 0:
+                             variant_prices["CP"] = p_val
+                    
+                    # Simple image match
+                    cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+                    best_img_idx = -1
+                    best_dist = float("inf")
+                    for i_idx, ir in enumerate(img_records):
+                        ir_rect = ir["rect"]
+                        icx, icy = (ir_rect.x0+ir_rect.x1)/2, (ir_rect.y0+ir_rect.y1)/2
+                        dist = ((icx-cx)**2 + (icy-cy)**2)**0.5
+                        if dist < best_dist and dist < 700:
+                            best_dist = dist
+                            best_img_idx = i_idx
+                    
+                    img_path = img_records[best_img_idx]["path"] if best_img_idx != -1 else ""
+                    
+                    display_text = f"{prod_full_name}\n"
+                    if variant_prices:
+                        for lbl, prc in variant_prices.items():
+                            display_text += f"MRP ({lbl}) : ` {prc}/-\n"
+                    else:
+                        display_text += f"MRP : ` {primary_price}/-"
+                    
+                    page_items.append({
+                        "text": display_text.strip(),
+                        "name": prod_full_name,
+                        "price": primary_price,
+                        "variant_prices": variant_prices,
+                        "page": page_num + 1,
+                        "source": pdf_name,
+                        "images": [img_path] if img_path else [],
+                        "brand": brand,
+                        "category": current_category or "Plumber Products"
+                    })
+            
+            content_list.extend(page_items)
+            continue
+
 
         if brand == "Aquant" and (page_num + 1) in AQUANT_SKIP_PAGES:
             continue

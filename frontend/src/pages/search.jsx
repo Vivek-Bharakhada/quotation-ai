@@ -3,18 +3,68 @@ import axios from 'axios';
 import './search.css';
 
 import BASE from '../api';
+import { readJson, writeJson } from '../utils/storage';
 
+const SEARCH_UI_KEY = 'quotation-ai/search-ui';
+const SEARCH_CACHE_KEY = 'quotation-ai/search-cache';
+const SEARCH_CACHE_LIMIT = 12;
+
+const buildSearchKey = (query, brand) =>
+  `${String(brand || 'all').toLowerCase()}::${String(query || '').trim().toLowerCase()}`;
+
+const getStoredSearchUi = () => {
+  const stored = readJson(SEARCH_UI_KEY, {});
+  return stored && typeof stored === 'object' ? stored : {};
+};
+
+const getStoredSearchCache = () => {
+  const stored = readJson(SEARCH_CACHE_KEY, {});
+  return stored && typeof stored === 'object' ? stored : {};
+};
+
+const saveCachedSearch = (query, brand, results) => {
+  if (!query || !Array.isArray(results)) {
+    return;
+  }
+
+  const key = buildSearchKey(query, brand);
+  const current = getStoredSearchCache();
+  const nextEntries = {
+    ...current,
+    [key]: {
+      query,
+      brand,
+      results: results.slice(0, 12),
+      updatedAt: Date.now(),
+    },
+  };
+
+  const trimmed = Object.entries(nextEntries)
+    .sort(([, left], [, right]) => (right.updatedAt || 0) - (left.updatedAt || 0))
+    .slice(0, SEARCH_CACHE_LIMIT)
+    .reduce((accumulator, [entryKey, value]) => {
+      accumulator[entryKey] = value;
+      return accumulator;
+    }, {});
+
+  writeJson(SEARCH_CACHE_KEY, trimmed);
+};
 
 export default function Search({ cart, setCart, setFooterVisible }) {
-  const [query, setQuery] = useState('');
+  const storedUi = getStoredSearchUi();
+  const [query, setQuery] = useState(() => storedUi.query || '');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState(() => (Array.isArray(storedUi.results) ? storedUi.results : []));
   const [loading, setLoading] = useState(false);
-  const [selectedBrand, setSelectedBrand] = useState('all');
+  const [selectedBrand, setSelectedBrand] = useState(() => storedUi.selectedBrand || 'all');
   const [viewProduct, setViewProduct] = useState(null);
   const [failedImages, setFailedImages] = useState({});
+  const [selectedVariants, setSelectedVariants] = useState(() => storedUi.selectedVariants || {});
+  const [searchMode, setSearchMode] = useState(() => storedUi.searchMode || 'idle');
+  const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine));
   const suggestionRef = useRef(null);
+  const lastBrandRef = useRef(selectedBrand);
 
   // Sync footer visibility with suggestions
   useEffect(() => {
@@ -44,8 +94,14 @@ export default function Search({ cart, setCart, setFooterVisible }) {
       return;
     }
 
+    if (isOffline) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
     const timer = setTimeout(() => {
-      axios.get(`${BASE}/search-suggestions?q=${encodeURIComponent(query)}`)
+      axios.get(`${BASE}/search-suggestions?q=${encodeURIComponent(query)}&brand=${selectedBrand}`)
         .then(res => {
           const list = res.data.suggestions || [];
           setSuggestions(list);
@@ -55,18 +111,64 @@ export default function Search({ cart, setCart, setFooterVisible }) {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, selectedBrand, isOffline]);
+
+  // Re-trigger search when brand changes
+  useEffect(() => {
+    const brandChanged = lastBrandRef.current !== selectedBrand;
+    lastBrandRef.current = selectedBrand;
+
+    if (brandChanged && query.trim()) {
+      handleSearch(query, selectedBrand);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBrand, query]);
+
+  useEffect(() => {
+    writeJson(SEARCH_UI_KEY, {
+      query,
+      results,
+      selectedBrand,
+      selectedVariants,
+      searchMode,
+    });
+  }, [query, results, selectedBrand, selectedVariants, searchMode]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleSearch = async (overrideQuery, brandOverride) => {
     const q = (typeof overrideQuery === 'string' ? overrideQuery : query).trim();
     if (!q) return;
 
+    const brandParam = typeof brandOverride === 'string' ? brandOverride : selectedBrand;
+    const cache = getStoredSearchCache();
+    const cachedEntry = cache[buildSearchKey(q, brandParam)];
+
+    if (isOffline) {
+      setLoading(false);
+      setShowSuggestions(false);
+      setResults(cachedEntry?.results || []);
+      setSearchMode(cachedEntry?.results?.length ? 'offline-cache' : 'offline-miss');
+      return;
+    }
+
     setLoading(true);
     setResults([]);
     setShowSuggestions(false);
+    setSearchMode('loading');
 
     const ts = Date.now();
-    const brandParam = typeof brandOverride === 'string' ? brandOverride : selectedBrand;
     const brandQuery = brandParam !== 'all' ? `&brand=${brandParam}` : '';
     const exactQuery = '&exact=true';
 
@@ -75,10 +177,15 @@ export default function Search({ cart, setCart, setFooterVisible }) {
       .then((res) => {
         const apiResults = res.data.results || [];
         setResults(apiResults);
+        setSearchMode('online');
+        saveCachedSearch(q, brandParam, apiResults);
         setLoading(false);
       })
       .catch((err) => {
         console.error('Search failed', err);
+        const fallbackResults = cachedEntry?.results || [];
+        setResults(fallbackResults);
+        setSearchMode(fallbackResults.length ? 'offline-cache' : 'error');
         setLoading(false);
       });
   };
@@ -86,32 +193,42 @@ export default function Search({ cart, setCart, setFooterVisible }) {
   const selectSuggestion = (s) => {
     setQuery(s.text);
     setShowSuggestions(false);
-    handleSearch(s.text);
+    handleSearch(s.text, selectedBrand);
   };
 
-  const addToCart = (product) => {
+  const addToCart = (product, forcedVariant = null) => {
     const lines = product.text.split('\n');
-    const name = lines[0]?.trim() || 'Unknown Product';
+    const baseName = lines[0]?.trim() || 'Unknown Product';
 
-    let price = product.price || '';
-    if (!price || price === '0') {
+    let finalPrice = product.price || '';
+    let finalVariant = forcedVariant || selectedVariants[product.text] || (product.variant_prices && Object.keys(product.variant_prices)[0]) || '';
+    
+    if (product.variant_prices && finalVariant && product.variant_prices[finalVariant]) {
+      finalPrice = product.variant_prices[finalVariant];
+    }
+
+    if (!finalPrice || finalPrice === '0') {
       const mrpMatch = product.text.match(/MRP[^\d]*([\d,]+)/i);
       if (mrpMatch) {
-        price = mrpMatch[1].replace(/,/g, '');
+        finalPrice = mrpMatch[1].replace(/,/g, '');
       } else {
         const allNumbers = product.text.match(/[\d,]{4,}/g);
         if (allNumbers && allNumbers.length > 0) {
-          price = allNumbers[allNumbers.length - 1].replace(/,/g, '');
+          finalPrice = allNumbers[allNumbers.length - 1].replace(/,/g, '');
         }
       }
     }
 
+    const displayName = finalVariant ? `${baseName} (${finalVariant})` : baseName;
+
     const newItem = {
-      id: product.text,
-      name,
-      price,
+      id: `${product.text}-${finalVariant}`,
+      name: displayName,
+      price: finalPrice,
       rawText: product.text,
       image: product.images && product.images.length > 0 ? product.images[0] : null,
+      brand: product.brand,
+      finish: finalVariant
     };
 
     setCart((prev) => [...prev, newItem]);
@@ -124,14 +241,25 @@ export default function Search({ cart, setCart, setFooterVisible }) {
   };
 
   const foundBrands = new Set(results.map((item) => (item.brand || '').toLowerCase()).filter(Boolean));
-  const missingBrands = ['Aquant', 'Kohler'].filter((brand) => !foundBrands.has(brand.toLowerCase()));
+  const missingBrands = ['Aquant', 'Kohler', 'Plumber'].filter((brand) => !foundBrands.has(brand.toLowerCase()));
   const showSearchSummary = !loading && query && results.length > 0;
+
+  let statusMessage = '';
+  if (isOffline && searchMode === 'offline-cache') {
+    statusMessage = 'Offline mode: showing cached search results from your previous online search.';
+  } else if (isOffline && searchMode === 'offline-miss') {
+    statusMessage = 'Offline mode: this query is not cached yet. Go online once to fetch and save it.';
+  } else if (!isOffline && searchMode === 'error') {
+    statusMessage = 'Live search failed. Please check your backend URL or internet connection.';
+  } else if (isOffline && !query) {
+    statusMessage = 'Offline mode is active. Quotation drafts and saved cart still work.';
+  }
 
   let searchSummary = '';
   if (showSearchSummary) {
     if (selectedBrand === 'all') {
       if (results.length >= 2) {
-        searchSummary = 'Best exact match from both PDFs.';
+        searchSummary = 'Best exact match from various catalogs.';
       } else {
         const matchedBrand = results[0]?.brand || 'selected catalog';
         const missingLabel = missingBrands.join(' + ');
@@ -160,7 +288,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
 
       <section className="sp-brand-wrap">
         <div className="sp-brand-tabs">
-          {['all', 'Aquant', 'Kohler'].map((brand) => (
+          {['all', 'Aquant', 'Kohler', 'Plumber'].map((brand) => (
             <button
               key={brand}
               onClick={() => setSelectedBrand(brand)}
@@ -215,6 +343,8 @@ export default function Search({ cart, setCart, setFooterVisible }) {
 
       </div>
 
+      {statusMessage && <div className={`sp-status-banner ${isOffline ? 'offline' : 'error'}`}>{statusMessage}</div>}
+
       {showSearchSummary && <div className="sp-search-summary">{searchSummary}</div>}
 
       {loading && (
@@ -231,7 +361,10 @@ export default function Search({ cart, setCart, setFooterVisible }) {
 
       <section className="sp-grid">
         {results.map((r, i) => {
-          const added = isInCart(r.text);
+          const currentVariant = selectedVariants[r.text] || (r.variant_prices && Object.keys(r.variant_prices)[0]) || '';
+          const displayPrice = (r.variant_prices && currentVariant && r.variant_prices[currentVariant]) || r.price;
+          
+          const added = isInCart(`${r.text}-${currentVariant}`);
           const title = r.text.split('\n')[0].substring(0, 100);
           const imageCandidates = (r.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
           const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
@@ -258,8 +391,27 @@ export default function Search({ cart, setCart, setFooterVisible }) {
 
                 <h3 className="sp-card-title">{title}</h3>
 
-                {r.price && r.price !== '0' && (
-                  <div className="sp-price">MRP: {parseInt(r.price, 10).toLocaleString('en-IN')}</div>
+                {r.variant_prices && Object.keys(r.variant_prices).length > 0 && (
+                  <div className="sp-variant-selector">
+                    <span className="sp-variant-label">Select Finish / Variant</span>
+                    <select 
+                      className="sp-variant-select"
+                      value={selectedVariants[r.text] || Object.keys(r.variant_prices)[0]}
+                      onChange={(e) => setSelectedVariants(prev => ({...prev, [r.text]: e.target.value}))}
+                    >
+                      {Object.keys(r.variant_prices).map(v => (
+                        <option key={v} value={v}>{v} - ₹{parseInt(r.variant_prices[v], 10).toLocaleString('en-IN')}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {displayPrice && displayPrice !== '0' && (
+                  <div className="sp-price">
+                    {(r.brand || '').toLowerCase() === 'plumber' ? 'MRP Per Unit: ' : 'MRP: '}
+                    ₹{parseInt(displayPrice, 10).toLocaleString('en-IN')}
+                    {currentVariant && <span className="sp-price-variant-tag"> ({currentVariant})</span>}
+                  </div>
                 )}
 
                 <div className="sp-actions">
@@ -308,4 +460,3 @@ export default function Search({ cart, setCart, setFooterVisible }) {
     </div>
   );
 }
-

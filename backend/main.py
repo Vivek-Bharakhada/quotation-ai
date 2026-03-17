@@ -73,6 +73,8 @@ def index_local_catalogs(force=False):
             brand = "Aquant"
         elif "kohler" in filename.lower():
             brand = "Kohler"
+        elif "plumber" in filename.lower():
+            brand = "Plumber"
         else:
             continue
         
@@ -416,8 +418,9 @@ def search_item(q: str, brand: str = None, smart: bool = False, exact: bool = Fa
     return {"results": results}
 
 @app.get("/search-suggestions")
-def search_suggestions(q: str):
-    return {"suggestions": search_engine.get_suggestions(q)}
+def search_suggestions(q: str, brand: str = None):
+    if brand == "all": brand = None
+    return {"suggestions": search_engine.get_suggestions(q, brand=brand)}
 
 
 @app.post("/catalog/add")
@@ -561,7 +564,7 @@ def get_catalog_index():
         brand = item.get("brand")
         if not brand:
             src = str(item.get("source") or "Generic").lower()
-            brand = "Kohler" if "kohler" in src else "Aquant" if "aquant" in src else "Generic"
+            brand = "Kohler" if "kohler" in src else "Aquant" if "aquant" in src else "Plumber" if "plumber" in src else "Generic"
         
         if brand not in brand_map:
             brand_map[brand] = {"name": brand, "collections": set()}
@@ -582,8 +585,8 @@ def get_catalog_index():
 
     result = []
     # Always prioritize the big two for display
-    for b_name in ["Aquant", "Kohler"]:
-        if b_name in brand_map:
+    for b_name in ["Aquant", "Kohler", "Plumber"]:
+       if b_name in brand_map:
             b_data = brand_map.pop(b_name)
             cols = sorted(list(b_data["collections"])) or ["Standard Products"]
             result.append({"brand": b_name, "collections": cols[:25]})

@@ -82,6 +82,21 @@ const KOHLER_INDEX = [
   { title: 'Cleaning Solutions' },
 ];
 
+const PLUMBER_INDEX = [
+  { title: 'Dune' },
+  { title: 'Aura' },
+  { title: 'Chorus-F' },
+  { title: 'Prive' },
+  { title: 'Cross' },
+  { title: 'Poem' },
+  { title: 'Rover' },
+  { title: 'Showers' },
+  { title: 'Accessories' },
+  { title: 'Thermostatic Mixers' },
+  { title: 'Universal Items' },
+  { title: 'Faucets' },
+];
+
 const BRAND_META = {
   Aquant: {
     subtitle: 'Contemporary Bathrooms',
@@ -91,17 +106,25 @@ const BRAND_META = {
   },
   Kohler: {
     subtitle: 'The Bold Look of Kohler',
-    title: 'Price Book 2025',
+    title: 'Price Book 2026',
     heroImage: '/kohler_cover.jpg',
+  },
+  Plumber: {
+    subtitle: 'Plumber Bathware',
+    title: 'Luxury Collection 2026',
+    heroImage: `${BASE}/static/images/plumber_hero_premium.png`,
   },
 };
 
-function toPriceLabel(rawPrice) {
+function toPriceLabel(rawPrice, brand) {
   const parsed = Number(String(rawPrice ?? '').replace(/,/g, ''));
+  const isPlumber = String(brand || '').toLowerCase() === 'plumber';
+  const prefix = isPlumber ? 'MRP Per Unit' : 'MRP';
+
   if (Number.isFinite(parsed) && parsed > 0) {
-    return `MRP ${parsed.toLocaleString()}`;
+    return `${prefix} ${parsed.toLocaleString()}`;
   }
-  return 'MRP on request';
+  return `${prefix} on request`;
 }
 
 function extractCodePrefix(value) {
@@ -158,6 +181,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
   const [visibleCount, setVisibleCount] = useState(40);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [failedImages, setFailedImages] = useState({});
+  const [selectedVariants, setSelectedVariants] = useState({});
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -167,6 +191,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
     () => ({
       Aquant: AQUANT_INDEX,
       Kohler: KOHLER_INDEX,
+      Plumber: PLUMBER_INDEX,
     }),
     []
   );
@@ -257,32 +282,40 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
     }
   };
 
-  const productCartId = (item) => {
+  const productCartId = (item, variant = '') => {
     const brand = viewingCategory?.brand || activeBrand;
-    return `${brand}|${item.name || 'item'}|${item.page || 0}|${item.price || 0}`;
+    const name = item.name || item.text?.split('\n')[0] || 'Unknown Product';
+    return `${brand}|${name}|${item.page || 0}|${variant}`;
   };
 
-  const isInCart = (item) => cart.some((row) => row.id === productCartId(item));
-
   const addToCart = (item) => {
-    const id = productCartId(item);
+    const brand = viewingCategory?.brand || activeBrand;
+    const currentVariant = selectedVariants[item.name] || (item.variant_prices && Object.keys(item.variant_prices)[0]) || '';
+    const id = productCartId(item, currentVariant);
+    
     if (cart.some((row) => row.id === id)) {
       return;
     }
 
+    const baseName = item.name || item.text?.split('\n')[0] || 'Unknown Product';
+    const finalName = currentVariant ? `${baseName} (${currentVariant})` : baseName;
+    const finalPrice = (item.variant_prices && currentVariant && item.variant_prices[currentVariant]) || item.price || '0';
+
     const newItem = {
       id,
-      name: item.name || item.text?.split('\n')[0] || 'Unknown Product',
-      price: item.price || '0',
+      name: finalName,
+      price: finalPrice,
       rawText: item.text || '',
       image: item.images && item.images.length > 0 ? item.images[0] : null,
+      brand: brand,
+      finish: currentVariant
     };
 
     setCart((prev) => [...prev, newItem]);
   };
 
   return (
-    <div className={`db-root ${activeBrand === 'Aquant' ? 'brand-aquant' : 'brand-kohler'}`}>
+    <div className={`db-root brand-${activeBrand.toLowerCase()}`}>
       {!viewingCategory ? (
         <>
           <section
@@ -431,7 +464,10 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                 <>
                   <div className="db-products-grid">
                     {categoryProducts.slice(0, visibleCount).map((item, idx) => {
-                      const alreadyAdded = isInCart(item);
+                      const currentVariant = selectedVariants[item.name] || (item.variant_prices && Object.keys(item.variant_prices)[0]) || '';
+                      const displayPrice = (item.variant_prices && currentVariant && item.variant_prices[currentVariant]) || item.price;
+                      
+                      const alreadyAdded = cart.some(row => row.id === productCartId(item, currentVariant));
                       const imageCandidates = (item.images || []).filter(Boolean).map((p) => `${BASE}${p}`);
                       const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
                       const hasImage = imageSrc && !failedImages[imageSrc];
@@ -450,8 +486,25 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                           <h3>{item.name || 'Unnamed Product'}</h3>
                           <p>{buildSummary(item.text, item.name)}</p>
 
+                          {item.variant_prices && Object.keys(item.variant_prices).length > 0 && (
+                            <div className="db-variant-selector">
+                              <select 
+                                className="db-variant-select"
+                                value={selectedVariants[item.name] || Object.keys(item.variant_prices)[0]}
+                                onChange={(e) => setSelectedVariants(prev => ({...prev, [item.name]: e.target.value}))}
+                              >
+                                {Object.keys(item.variant_prices).map(v => (
+                                  <option key={v} value={v}>{v} - ₹{parseInt(item.variant_prices[v], 10).toLocaleString('en-IN')}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
                           <div className="db-product-footer">
-                            <span>{toPriceLabel(item.price)}</span>
+                            <div className="db-product-price-col">
+                              <span>{toPriceLabel(displayPrice, viewingCategory?.brand || activeBrand)}</span>
+                              {currentVariant && <span className="db-variant-tag">{currentVariant}</span>}
+                            </div>
                             <button
                               className={`db-card-btn ${alreadyAdded ? 'added' : ''}`}
                               onClick={() => addToCart(item)}

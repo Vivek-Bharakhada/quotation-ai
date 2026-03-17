@@ -28,10 +28,57 @@
   margin-bottom: 1.25rem;
 }
 
+.qt-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
 .qt-header h2 {
   font-size: clamp(1.65rem, 2.9vw, 2.4rem);
   font-weight: 900;
   letter-spacing: -0.02em;
+}
+
+.qt-header-note {
+  margin: 0.45rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.qt-reset-btn {
+  min-height: 40px;
+  padding: 0.72rem 0.95rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.86rem;
+  background: color-mix(in srgb, var(--card-bg) 92%, #ffffff 8%);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.qt-status-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--card-bg) 90%, #ffffff 10%);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.qt-status-banner.offline {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+  color: #92400e;
 }
 
 .qt-client-grid {
@@ -357,6 +404,24 @@
 
 .qt-bg-logo-icon {
   font-size: 1.1rem;
+}
+
+.qt-notify-btn {
+  min-height: 40px;
+  padding: 0.68rem 0.9rem;
+  border-radius: 0.86rem;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  background: rgba(14, 165, 233, 0.08);
+  color: #0f172a;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.qt-notify-btn.enabled {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
 }
 
 /* Made By section */
@@ -889,6 +954,34 @@
   background: rgba(15, 23, 42, 0.48);
 }
 
+.dark-theme .qt-reset-btn {
+  background: rgba(15, 23, 42, 0.7);
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.dark-theme .qt-status-banner {
+  background: rgba(15, 23, 42, 0.76);
+  border-color: #243246;
+  color: #e2e8f0;
+}
+
+.dark-theme .qt-status-banner.offline {
+  color: #facc15;
+}
+
+.dark-theme .qt-notify-btn {
+  background: rgba(14, 165, 233, 0.18);
+  border-color: rgba(14, 165, 233, 0.28);
+  color: #e0f2fe;
+}
+
+.dark-theme .qt-notify-btn.enabled {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.28);
+  color: #a7f3d0;
+}
+
 @media (max-width: 1280px) {
   .qt-item-grid {
     grid-template-columns: 62px minmax(200px, 1fr) 110px 88px 94px auto;
@@ -936,6 +1029,10 @@
 
   .qt-header {
     margin-bottom: 0.85rem;
+  }
+
+  .qt-header-row {
+    flex-direction: column;
   }
 
   .qt-items-head {

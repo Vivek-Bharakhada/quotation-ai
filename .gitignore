@@ -50,6 +50,12 @@ node_modules/
 
 # React build output
 frontend/build/
+frontend/build_app/
+frontend/build_pwa/
+frontend/build_pwa_verify/
+frontend/android/
+frontend/ios/
+frontend/dist-electron/
 
 # Environment variables
 .env
