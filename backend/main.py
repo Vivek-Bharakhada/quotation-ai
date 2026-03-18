@@ -163,12 +163,42 @@ def _load_pdf_bytes(pdf_url: str, requested_name: str = ""):
     with open(pdf_path, "rb") as handle:
         return handle.read(), requested_name or detected_name
 
+
+def _list_local_catalog_files():
+    if not os.path.exists(UPLOAD_DIR):
+        return []
+
+    file_details = []
+    for filename in os.listdir(UPLOAD_DIR):
+        if not filename.lower().endswith(".pdf"):
+            continue
+
+        path = os.path.join(UPLOAD_DIR, filename)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+
+        file_details.append({
+            "name": filename,
+            "size": round(stat.st_size / (1024 * 1024), 2),
+            "date": stat.st_mtime,
+        })
+
+    file_details.sort(key=lambda item: item["date"], reverse=True)
+    return file_details
+
 def _sync_cloud_catalogs_to_local():
     if not cloud_storage.is_enabled():
         return
 
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
+        local_names = {
+            filename
+            for filename in os.listdir(UPLOAD_DIR)
+            if filename.lower().endswith(".pdf")
+        }
         remote_entries = [
             entry for entry in cloud_storage.list_objects(cloud_storage.CATALOGS_BUCKET)
             if str(entry.get("name") or "").lower().endswith(".pdf")
@@ -184,8 +214,30 @@ def _sync_cloud_catalogs_to_local():
             if not os.path.exists(local_path):
                 cloud_storage.download_to_path(cloud_storage.CATALOGS_BUCKET, filename, local_path)
 
+        # Bootstrap bundled/local catalogs into cloud if the bucket is empty
+        # or if the deployment still has seed PDFs that are not yet synced.
+        for filename in sorted(local_names):
+            if filename in remote_names:
+                continue
+            local_path = os.path.join(UPLOAD_DIR, filename)
+            try:
+                cloud_storage.upload_file(
+                    cloud_storage.CATALOGS_BUCKET,
+                    filename,
+                    local_path,
+                    "application/pdf",
+                )
+                remote_names.add(filename)
+            except Exception as e:
+                print(f"Warning: failed to bootstrap catalog '{filename}' to cloud: {e}")
+
+        # Only delete local PDFs when cloud has a non-empty authoritative list.
         for filename in os.listdir(UPLOAD_DIR):
-            if filename.lower().endswith(".pdf") and filename not in remote_names:
+            if (
+                remote_names
+                and filename.lower().endswith(".pdf")
+                and filename not in remote_names
+            ):
                 try:
                     os.remove(os.path.join(UPLOAD_DIR, filename))
                 except OSError:
@@ -321,6 +373,11 @@ async def refresh_catalogs():
 @app.get("/status")
 def get_status():
     import search_engine
+    if not search_engine.stored_items:
+        try:
+            search_engine.load_index()
+        except Exception as e:
+            print(f"Warning: failed to load search index during status check: {e}")
     total = len(search_engine.stored_items)
     samples = []
     for item in search_engine.stored_items[:5]:
@@ -332,6 +389,7 @@ def get_status():
     return {
         "indexed_items": total,
         "faiss_ready": search_engine.vector_index is not None,
+        "catalog_files": len(_list_local_catalog_files()),
         "sample_items": samples
     }
 
@@ -662,27 +720,12 @@ def list_uploads():
                 })
 
             file_details.sort(key=lambda item: item["date"], reverse=True)
-            return {"files": file_details}
+            if file_details:
+                return {"files": file_details}
         except Exception as e:
             print(f"Warning: failed to list cloud uploads: {e}")
 
-    upload_dir = UPLOAD_DIR
-    if not os.path.exists(upload_dir):
-        return {"files": []}
-    files = [f for f in os.listdir(upload_dir) if f.lower().endswith(".pdf")]
-    # Get file stats (size and date)
-    file_details = []
-    for f in files:
-        path = os.path.join(upload_dir, f)
-        stat = os.stat(path)
-        file_details.append({
-            "name": f,
-            "size": round(stat.st_size / (1024 * 1024), 2), # MB
-            "date": stat.st_mtime
-        })
-    # Sort by date descending
-    file_details.sort(key=lambda x: x["date"], reverse=True)
-    return {"files": file_details}
+    return {"files": _list_local_catalog_files()}
 
 @app.delete("/delete-upload/{filename}")
 def delete_upload(filename: str):
