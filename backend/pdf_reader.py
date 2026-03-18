@@ -2,8 +2,13 @@ import fitz  # PyMuPDF
 import os
 import re
 import hashlib
+from collections import defaultdict
+
+from PIL import Image, ImageChops, ImageOps
 
 import cloud_storage
+
+RESAMPLING = getattr(Image, "Resampling", Image)
 
 
 def clean_text(text):
@@ -142,7 +147,13 @@ AQUANT_SPECIAL_FINISH_IMAGE_ROW_PAGES = set(range(4, 54)) | set(range(68, 83)) |
 AQUANT_SPECIAL_FINISH_ROW_TOLERANCE = 5.0
 
 
-IMAGE_GENERATION_VERSION = "clip_v2"
+IMAGE_GENERATION_VERSION = "clip_v3_hd"
+IMAGE_CANVAS_SIZE = 720
+IMAGE_INNER_BOX = 620
+MIN_PRODUCT_IMAGE_SHORT_SIDE = 60
+MAX_PRODUCT_IMAGE_ASPECT_RATIO = 6.0
+SUSPICIOUS_SHARED_IMAGE_ITEM_LIMIT = 12
+SUSPICIOUS_SHARED_IMAGE_FAMILY_LIMIT = 8
 
 
 AQUANT_MANUAL_FAMILY_OVERRIDES = {
@@ -208,6 +219,142 @@ def extract_price_value(text):
         if match:
             return match.group(1).replace(",", "").split(".")[0]
     return None
+
+
+def _image_short_side(width, height):
+    return min(int(width or 0), int(height or 0))
+
+
+def _image_aspect_ratio(width, height):
+    short_side = max(1, _image_short_side(width, height))
+    return max(int(width or 0), int(height or 0)) / short_side
+
+
+def _white_ratio(image):
+    sample = image.convert("RGB").resize((64, 64))
+    total = 64 * 64
+    bright = 0
+    for r, g, b in sample.getdata():
+        if r >= 243 and g >= 243 and b >= 243:
+            bright += 1
+    return bright / total
+
+
+def _trim_possible_caption_band(image):
+    width, height = image.size
+    if width < 80 or height < 120:
+        return image
+
+    candidates = (0.92, 0.88, 0.84)
+    for cutoff_ratio in candidates:
+        cutoff = int(height * cutoff_ratio)
+        if cutoff <= int(height * 0.6):
+            continue
+
+        bottom_band = image.crop((0, cutoff, width, height))
+        upper_band = image.crop((0, max(0, cutoff - max(24, height // 8)), width, cutoff))
+        bottom_white = _white_ratio(bottom_band)
+        upper_white = _white_ratio(upper_band) if upper_band.size[1] > 0 else 0.0
+
+        if bottom_white >= 0.86 and bottom_white >= upper_white + 0.12:
+            return image.crop((0, 0, width, cutoff))
+
+    return image
+
+
+def _trim_white_border(image):
+    rgb_image = image.convert("RGB")
+    bg = Image.new("RGB", rgb_image.size, "white")
+    diff = ImageChops.difference(rgb_image, bg)
+    bbox = diff.getbbox()
+    if not bbox:
+        return rgb_image
+
+    left, top, right, bottom = bbox
+    margin_x = max(6, int((right - left) * 0.04))
+    margin_y = max(6, int((bottom - top) * 0.04))
+    return rgb_image.crop((
+        max(0, left - margin_x),
+        max(0, top - margin_y),
+        min(rgb_image.width, right + margin_x),
+        min(rgb_image.height, bottom + margin_y),
+    ))
+
+
+def _render_hd_product_image(image_path):
+    with Image.open(image_path) as image:
+        rgb_image = image.convert("RGB")
+        rgb_image = _trim_possible_caption_band(rgb_image)
+        rgb_image = _trim_white_border(rgb_image)
+        content_width, content_height = rgb_image.size
+
+        canvas = Image.new("RGB", (IMAGE_CANVAS_SIZE, IMAGE_CANVAS_SIZE), "white")
+        fitted = ImageOps.contain(rgb_image, (IMAGE_INNER_BOX, IMAGE_INNER_BOX), method=RESAMPLING.LANCZOS)
+        offset_x = (IMAGE_CANVAS_SIZE - fitted.width) // 2
+        offset_y = (IMAGE_CANVAS_SIZE - fitted.height) // 2
+        canvas.paste(fitted, (offset_x, offset_y))
+        canvas.save(image_path, format="JPEG", quality=92, optimize=True)
+
+    return {
+        "content_width": content_width,
+        "content_height": content_height,
+        "short_side": _image_short_side(content_width, content_height),
+        "aspect_ratio": _image_aspect_ratio(content_width, content_height),
+    }
+
+
+def _is_reasonable_product_image(image_meta):
+    if not image_meta:
+        return False
+    if image_meta.get("short_side", 0) < MIN_PRODUCT_IMAGE_SHORT_SIDE:
+        return False
+    if image_meta.get("aspect_ratio", 0.0) > MAX_PRODUCT_IMAGE_ASPECT_RATIO:
+        return False
+    return True
+
+
+def _prune_suspicious_page_images(page_products, image_records):
+    if not page_products or not image_records:
+        return
+
+    records_by_path = {
+        record["path"]: record for record in image_records
+        if record.get("path")
+    }
+    path_usage = defaultdict(int)
+    family_usage = defaultdict(set)
+
+    for item in page_products:
+        family_key = extract_product_family_key(item.get("name", "")) or clean_text(item.get("name", ""))
+        for image_path in item.get("images") or []:
+            path_usage[image_path] += 1
+            if family_key:
+                family_usage[image_path].add(family_key)
+
+    blocked_paths = set()
+    for image_path, count in path_usage.items():
+        record = records_by_path.get(image_path, {})
+        image_meta = record.get("image_meta") or {}
+        if not _is_reasonable_product_image(image_meta):
+            blocked_paths.add(image_path)
+            continue
+
+        if (
+            count > SUSPICIOUS_SHARED_IMAGE_ITEM_LIMIT
+            and len(family_usage.get(image_path, set())) > SUSPICIOUS_SHARED_IMAGE_FAMILY_LIMIT
+        ):
+            blocked_paths.add(image_path)
+
+    if not blocked_paths:
+        return
+
+    for item in page_products:
+        if not item.get("images"):
+            continue
+        item["images"] = [
+            image_path for image_path in item.get("images", [])
+            if image_path not in blocked_paths
+        ]
 
 
 def strip_price_markup(text):
@@ -753,12 +900,16 @@ def extract_content(pdf_path, max_pages=None):
             try:
                 img_filename = f"{pdf_prefix}_p{page_num}_i{img_index}.jpg"
                 img_path = os.path.join(image_dir, img_filename)
+                image_meta = None
                 if not os.path.exists(img_path):
                     clip_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1)
-                    zoom = 2.4 if max(display_width, display_height) < 160 else 2.0
+                    zoom = 3.2 if max(display_width, display_height) < 180 else 2.6
                     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip_rect, alpha=False)
                     pix.save(img_path)
                     pix = None
+                    image_meta = _render_hd_product_image(img_path)
+                else:
+                    image_meta = _render_hd_product_image(img_path)
 
                 public_path = f"/static/images/{img_filename}"
                 if cloud_storage.is_enabled():
@@ -772,7 +923,11 @@ def extract_content(pdf_path, max_pages=None):
                     except Exception:
                         public_path = f"/static/images/{img_filename}"
 
-                img_records.append({"path": public_path, "rect": rect})
+                img_records.append({
+                    "path": public_path,
+                    "rect": rect,
+                    "image_meta": image_meta or {},
+                })
             except Exception:
                 continue
 
@@ -793,11 +948,15 @@ def extract_content(pdf_path, max_pages=None):
                         
                     img_filename = f"{pdf_prefix}_p{page_num}_block{i}.jpg"
                     img_path = os.path.join(image_dir, img_filename)
+                    image_meta = None
                     if not os.path.exists(img_path):
-                        zoom = 2.0
+                        zoom = 2.8
                         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=rect, alpha=False)
                         pix.save(img_path)
                         pix = None
+                        image_meta = _render_hd_product_image(img_path)
+                    else:
+                        image_meta = _render_hd_product_image(img_path)
                     public_path = f"/static/images/{img_filename}"
                     if cloud_storage.is_enabled():
                         try:
@@ -810,7 +969,11 @@ def extract_content(pdf_path, max_pages=None):
                         except Exception:
                             public_path = f"/static/images/{img_filename}"
 
-                    img_records.append({"path": public_path, "rect": rect})
+                    img_records.append({
+                        "path": public_path,
+                        "rect": rect,
+                        "image_meta": image_meta or {},
+                    })
         except Exception:
             pass
         def map_kohler_category(text):
@@ -2077,6 +2240,8 @@ def extract_content(pdf_path, max_pages=None):
                 and not is_product_code(item.get("name", ""))
             )
         ]
+
+        _prune_suspicious_page_images(page_products, available_images)
 
         for p in page_products:
             if not extract_product_family_key(p.get("name", "")):
