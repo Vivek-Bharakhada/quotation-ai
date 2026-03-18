@@ -357,6 +357,66 @@ def _prune_suspicious_page_images(page_products, image_records):
         ]
 
 
+def _score_catalog_image_match(item, image_record, page_half):
+    rect = image_record.get("rect")
+    if rect is None or not image_record.get("path"):
+        return None
+
+    p_cx = item.get("cx") or 0
+    p_cy = item.get("cy") or 0
+    p_col = 0 if p_cx < page_half else 1
+
+    img_cx = (rect.x0 + rect.x1) / 2
+    img_cy = (rect.y0 + rect.y1) / 2
+    i_col = 0 if img_cx < page_half else 1
+
+    dx = abs(img_cx - p_cx)
+    dy = img_cy - p_cy
+    col_penalty = 0 if p_col == i_col else 400
+    v_penalty = 0
+    if dy > 50:
+        v_penalty = 300
+    if dy < -450:
+        v_penalty = 200
+
+    distance = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
+    if distance >= 750:
+        return None
+
+    return distance
+
+
+def _assign_catalog_images_globally(page_products, available_images, page_half):
+    candidate_pairs = []
+    for product_index, item in enumerate(page_products):
+        if item.get("images"):
+            continue
+        for image_record in available_images:
+            score = _score_catalog_image_match(item, image_record, page_half)
+            if score is None:
+                continue
+            rect = image_record["rect"]
+            candidate_pairs.append(
+                (
+                    score,
+                    abs(((rect.y0 + rect.y1) / 2) - (item.get("cy") or 0)),
+                    abs(((rect.x0 + rect.x1) / 2) - (item.get("cx") or 0)),
+                    product_index,
+                    image_record["path"],
+                )
+            )
+
+    assigned_products = set()
+    used_image_paths = set()
+
+    for _, _, _, product_index, image_path in sorted(candidate_pairs):
+        if product_index in assigned_products or image_path in used_image_paths:
+            continue
+        page_products[product_index]["images"] = [image_path]
+        assigned_products.add(product_index)
+        used_image_paths.add(image_path)
+
+
 def strip_price_markup(text):
     cleaned = clean_text(text or "")
     cleaned = re.sub(r'\bMRP\b.*$', '', cleaned, flags=re.IGNORECASE).strip(" -:\t")
@@ -1868,48 +1928,8 @@ def extract_content(pdf_path, max_pages=None):
 
         # Image Matching
         available_images = list(img_records)
-        used_image_paths = set()
         page_half = page.rect.width / 2  # column boundary
-
-        for p_data in page_products:
-            best_img_idx = -1
-            best_dist = float("inf")
-
-            p_cx = p_data.get("cx") or 0
-            p_cy = p_data.get("cy") or 0
-            p_col = 0 if p_cx < page_half else 1
-
-            for i_idx, ir in enumerate(available_images):
-                if ir["rect"] is None: continue
-                img_path = ir["path"]
-                if img_path in used_image_paths: continue
-
-                img_rect = ir["rect"]
-                img_cx = (img_rect.x0 + img_rect.x1) / 2
-                img_cy = (img_rect.y0 + img_rect.y1) / 2
-                i_col = 0 if img_cx < page_half else 1
-
-                dx = abs(img_cx - p_cx)
-                dy = img_cy - p_cy
-
-                col_penalty = 0 if p_col == i_col else 400
-                v_penalty = 0
-                if dy > 50: v_penalty = 300
-                if dy < -450: v_penalty = 200
-
-                dist = (dx**2 + dy**2)**0.5 + v_penalty + col_penalty
-
-                if dist < best_dist and dist < 750:
-
-
-                    best_dist = dist
-                    best_img_idx = i_idx
-
-
-            if best_img_idx != -1:
-                img_path = available_images[best_img_idx]["path"]
-                p_data["images"] = [img_path]
-                used_image_paths.add(img_path)
+        _assign_catalog_images_globally(page_products, available_images, page_half)
 
 
         detail_candidates = [
