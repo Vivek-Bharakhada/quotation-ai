@@ -52,46 +52,50 @@ def index_local_catalogs(force=False):
     if getattr(index_local_catalogs, "_running", False):
         return
     index_local_catalogs._running = True
-    
-    import search_engine
-    if not force and len(search_engine.stored_items) > 0:
-        print("--- INDEX ALREADY LOADED, SKIPPING BACKGROUND SCAN ---")
+
+    try:
+        import search_engine
+        if not force and len(search_engine.stored_items) > 0:
+            print("--- INDEX ALREADY LOADED, SKIPPING BACKGROUND SCAN ---")
+            return
+
+        _sync_cloud_catalogs_to_local()
+
+        upload_dir = UPLOAD_DIR
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+            return
+
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(".pdf")]
+        if not files:
+            print("--- NO CATALOG PDF FOUND; KEEPING EXISTING INDEX ---")
+            return
+
+        print("--- BACKGROUND INDEXING START ---")
+        search_engine.reset_index()  # Clean all stored data and AI vectors
+
+        for filename in files:
+            if "aquant" in filename.lower():
+                brand = "Aquant"
+            elif "kohler" in filename.lower():
+                brand = "Kohler"
+            elif "plumber" in filename.lower():
+                brand = "Plumber"
+            else:
+                continue
+
+            path = os.path.join(upload_dir, filename)
+            try:
+                items = extract_content(path)
+                search_engine.add_to_index(None, items)
+                print(f"Indexed: {filename} as {brand}")
+            except Exception as e:
+                print(f"Error indexing {filename}: {e}")
+
+        print(f"--- BACKGROUND INDEXING COMPLETE ---")
+        search_engine.load_index()
+    finally:
         index_local_catalogs._running = False
-        return
-
-    print("--- BACKGROUND INDEXING START ---")
-    search_engine.reset_index()  # Clean all stored data and AI vectors
-
-    _sync_cloud_catalogs_to_local()
-
-    upload_dir = UPLOAD_DIR
-    if not os.path.exists(upload_dir):
-        os.makedirs(upload_dir)
-        index_local_catalogs._running = False
-        return
-
-    files = [f for f in os.listdir(upload_dir) if f.lower().endswith(".pdf")]
-    for filename in files:
-        if "aquant" in filename.lower():
-            brand = "Aquant"
-        elif "kohler" in filename.lower():
-            brand = "Kohler"
-        elif "plumber" in filename.lower():
-            brand = "Plumber"
-        else:
-            continue
-        
-        path = os.path.join(upload_dir, filename)
-        try:
-            items = extract_content(path)
-            search_engine.add_to_index(None, items)
-            print(f"Indexed: {filename} as {brand}")
-        except Exception as e:
-            print(f"Error indexing {filename}: {e}")
-    
-    print(f"--- BACKGROUND INDEXING COMPLETE ---")
-    search_engine.load_index()
-    index_local_catalogs._running = False
 
 def _bool_env(name: str, default: bool = False) -> bool:
     raw = str(os.getenv(name, str(default))).strip().lower()

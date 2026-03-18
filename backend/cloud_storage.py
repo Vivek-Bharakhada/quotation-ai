@@ -23,7 +23,8 @@ SYSTEM_BUCKET = str(os.getenv("SUPABASE_SYSTEM_BUCKET", "system")).strip() or "s
 
 
 def is_enabled() -> bool:
-    return USE_SUPABASE_STORAGE and bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+    has_valid_url = SUPABASE_URL.startswith("http://") or SUPABASE_URL.startswith("https://")
+    return USE_SUPABASE_STORAGE and has_valid_url and bool(SUPABASE_SERVICE_ROLE_KEY)
 
 
 def is_absolute_url(value: str) -> bool:

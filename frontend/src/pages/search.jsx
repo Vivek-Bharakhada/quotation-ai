@@ -56,7 +56,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
   const [query, setQuery] = useState(() => storedUi.query || '');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [results, setResults] = useState(() => (Array.isArray(storedUi.results) ? storedUi.results : []));
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedBrand, setSelectedBrand] = useState(() => storedUi.selectedBrand || 'all');
   const [viewProduct, setViewProduct] = useState(null);
@@ -128,12 +128,11 @@ export default function Search({ cart, setCart, setFooterVisible }) {
   useEffect(() => {
     writeJson(SEARCH_UI_KEY, {
       query,
-      results,
       selectedBrand,
       selectedVariants,
       searchMode,
     });
-  }, [query, results, selectedBrand, selectedVariants, searchMode]);
+  }, [query, selectedBrand, selectedVariants, searchMode]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
