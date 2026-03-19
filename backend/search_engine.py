@@ -70,6 +70,41 @@ catalog_summary_cache = None # Saved dashboard index
 INDEX_FILE = os.path.join(BASE_DIR, "search_index_v2.json")
 SEARCH_INDEX_OBJECT_PATH = os.getenv("SUPABASE_SEARCH_INDEX_PATH", "search/search_index_v2.json")
 
+STATIC_IMAGES_DIR = os.path.join(BASE_DIR, "static", "images")
+
+# Minimum file size (bytes) for a valid product image.
+# Images below this are icons, colour swatches, or small decorative elements from the PDF.
+_MIN_PRODUCT_IMAGE_SIZE = 8000
+
+
+def _image_file_size(image_path: str) -> int:
+    """Return the file size of a /static/images/… path, or -1 if missing."""
+    if not image_path:
+        return -1
+    fname = image_path.lstrip("/").replace("static/images/", "", 1).replace("static/", "", 1)
+    full = os.path.join(STATIC_IMAGES_DIR, os.path.basename(fname))
+    try:
+        return os.path.getsize(full)
+    except OSError:
+        return -1
+
+
+def _is_cover_page_image(image_path: str) -> bool:
+    """True when the image clearly comes from a PDF cover / title page."""
+    if not image_path:
+        return False
+    basename = os.path.basename(image_path)
+    # Matches patterns like  Brand_..._p0_i3.jpg  and  Brand_..._p1_i0.jpg
+    import re as _re
+    return bool(_re.search(r'_p[012]_i', basename))
+
+
+def _sanitize_item_images(items):
+    """
+    Skipped since images are now correctly pre-processed and extracted by model number.
+    """
+    pass
+
 def save_index():
     global stored_items, keyword_index
     data = {
@@ -113,15 +148,18 @@ def load_index():
                 stored_items = data.get("stored_items", [])
                 keyword_index = data.get("keyword_index", {})
             print(f"Index loaded: {len(stored_items)} items")
-            
+
+            # Strip bad/wrong product images (cover logos, tiny icons, missing files)
+            _sanitize_item_images(stored_items)
+
             # Reset caches
             search_cache = {}
             catalog_summary_cache = None
-            
+
             # Rebuild FAISS in background to avoid blocking API
             if AI_AVAILABLE and FAISS_AVAILABLE and stored_items:
                 threading.Thread(target=_rebuild_faiss_background, daemon=True).start()
-            
+
             return True
         except Exception as e:
             print(f"Error loading index: {e}")
