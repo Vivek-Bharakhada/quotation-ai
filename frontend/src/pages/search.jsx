@@ -13,6 +13,7 @@ const SEARCH_CACHE_LIMIT = 12;
 const buildSearchKey = (query, brand) =>
   `${String(brand || 'all').toLowerCase()}::${String(query || '').trim().toLowerCase()}`;
 
+// eslint-disable-next-line no-unused-vars
 const getStoredSearchUi = () => {
   const stored = readJson(SEARCH_UI_KEY, {});
   return stored && typeof stored === 'object' ? stored : {};

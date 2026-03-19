@@ -19,8 +19,6 @@ const APP_STATE_KEYS = {
   theme: 'quotation-ai/theme',
 };
 
-const ALLOWED_PAGES = new Set(['dashboard', 'search', 'quotation']);
-
 function getStandaloneMode() {
   if (typeof window === 'undefined') {
     return false;
