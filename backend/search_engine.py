@@ -65,6 +65,7 @@ keyword_index = {}   # word -> [item_indices]
 vector_index  = None # FAISS index
 search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
+item_code_meta_cache = {}
 
 
 INDEX_FILE = os.path.join(BASE_DIR, "search_index_v2.json")
@@ -75,6 +76,59 @@ STATIC_IMAGES_DIR = os.path.join(BASE_DIR, "static", "images")
 # Minimum file size (bytes) for a valid product image.
 # Images below this are icons, colour swatches, or small decorative elements from the PDF.
 _MIN_PRODUCT_IMAGE_SIZE = 8000
+
+_LEADING_CODE_WITH_VARIANT_RE = re.compile(
+    r'^\s*((?:[A-Z]{1,4}-\d[A-Z0-9-]*|\d[\d-]*))(?:\s+([A-Z0-9+]{1,12}))?',
+    re.IGNORECASE,
+)
+_KNOWN_FINISH_LABELS = {
+    "AB": "Antique Bronze",
+    "AC": "Antique Chrome",
+    "AN": "Antique Nickel",
+    "B": "Glossy Black",
+    "BC": "Beige Caramel",
+    "BCG": "Black Champagne Gold",
+    "BG": "Brushed Gold",
+    "BCK": "Matt Black",
+    "BRG": "Brushed Rose Gold",
+    "BSS": "Brushed Stainless Steel Finish",
+    "CB": "Chrome Black",
+    "CGY": "Chrome Grey",
+    "CH": "Chrome",
+    "CNG": "Champagne Gold",
+    "CP": "Chrome Plated",
+    "CW": "Chrome White",
+    "G": "Gold",
+    "GB": "Glossy Black",
+    "GG": "Graphite Grey/Glossy Gold",
+    "GM": "Gun Metal",
+    "GRY": "Matt Grey",
+    "LG": "Lunar Grey",
+    "MB": "Matt Black",
+    "MG": "Matt Grey",
+    "MI": "Matt Ivory",
+    "MW": "Matt White/White",
+    "OG": "Olive Green",
+    "ORB": "Oil Rubbed Bronze",
+    "RB": "Royal Blue",
+    "RG": "Rose Gold",
+    "RGB": "Rose Gold/Matt Black",
+    "RGD": "Rose Gold",
+    "RGW": "Rose Gold/Matt White",
+    "RN": "Royal Navy",
+    "SB": "Sky Blue",
+    "SG": "Seafoam Green",
+    "SN": "Satin Nickel",
+    "SSF": "Brushed Stainless Steel",
+    "TCR": "Terracotta Red",
+    "W": "White",
+    "WCG": "White Champagne Gold",
+    "WG": "White Glass",
+    "WN": "Walnut",
+    "WRG": "White Rose Gold",
+    "WTE": "Matt White",
+}
+_KNOWN_FINISH_CODES = tuple(sorted(_KNOWN_FINISH_LABELS.keys(), key=len, reverse=True))
 
 
 def _image_file_size(image_path: str) -> int:
@@ -97,6 +151,171 @@ def _is_cover_page_image(image_path: str) -> bool:
     # Matches patterns like  Brand_..._p0_i3.jpg  and  Brand_..._p1_i0.jpg
     import re as _re
     return bool(_re.search(r'_p[012]_i', basename))
+
+
+def _normalize_variant_token(token: str) -> str:
+    token = re.sub(r'\s+', '', str(token or "").upper())
+    token = token.strip("-_/+")
+    if not token:
+        return ""
+    return "+".join(part for part in token.split("+") if part)
+
+
+def _is_likely_finish_token(token: str) -> bool:
+    normalized = _normalize_variant_token(token)
+    if not normalized:
+        return False
+
+    parts = [part for part in normalized.split("+") if part]
+    if not parts:
+        return False
+
+    return all(part in _KNOWN_FINISH_LABELS for part in parts)
+
+
+def _split_attached_finish_token(code: str):
+    normalized = str(code or "").strip().upper()
+    if not normalized:
+        return "", ""
+
+    combo_match = re.match(
+        r'^((?:[A-Z]{1,4}-\d[A-Z0-9-]*|\d[\d-]*))([A-Z]{1,4}(?:\+[A-Z]{1,4})+)$',
+        normalized,
+    )
+    if combo_match:
+        base_code = combo_match.group(1).strip()
+        variant_code = _normalize_variant_token(combo_match.group(2))
+        if base_code and _is_likely_finish_token(variant_code):
+            return base_code, variant_code
+
+    if "-" in normalized:
+        maybe_base, maybe_variant = normalized.rsplit("-", 1)
+        maybe_variant = _normalize_variant_token(maybe_variant)
+        if maybe_base and _is_likely_finish_token(maybe_variant) and re.search(r'\d', maybe_base):
+            return maybe_base.strip(), maybe_variant
+
+    for finish_code in _KNOWN_FINISH_CODES:
+        if not normalized.endswith(finish_code):
+            continue
+        maybe_base = normalized[:-len(finish_code)].strip()
+        if maybe_base and re.search(r'\d', maybe_base):
+            return maybe_base, finish_code
+
+    return normalized, ""
+
+
+def _format_finish_label(variant_code: str) -> str:
+    normalized = _normalize_variant_token(variant_code)
+    if not normalized:
+        return ""
+    return " + ".join(_KNOWN_FINISH_LABELS.get(part, part) for part in normalized.split("+") if part)
+
+
+def _parse_code_metadata(raw_text: str):
+    text = str(raw_text or "").strip()
+    if not text:
+        return {
+            "base_code": "",
+            "variant_code": "",
+            "full_code": "",
+            "base_compact": "",
+            "variant_compact": "",
+            "full_compact": "",
+            "finish_label": "",
+        }
+
+    header = text.splitlines()[0].strip()
+    header = re.split(r'\s+-\s+', header, maxsplit=1)[0].strip()
+    header = re.sub(r'\bMRP\b.*$', '', header, flags=re.IGNORECASE).strip(" -:")
+    if not header:
+        return {
+            "base_code": "",
+            "variant_code": "",
+            "full_code": "",
+            "base_compact": "",
+            "variant_compact": "",
+            "full_compact": "",
+            "finish_label": "",
+        }
+
+    match = _LEADING_CODE_WITH_VARIANT_RE.match(header)
+    if match:
+        base_code = (match.group(1) or "").strip().upper()
+        variant_code = _normalize_variant_token(match.group(2))
+        if variant_code and not _is_likely_finish_token(variant_code):
+            variant_code = ""
+        if not variant_code:
+            base_code, variant_code = _split_attached_finish_token(base_code)
+    else:
+        base_code, variant_code = _split_attached_finish_token(header.upper())
+
+    full_code = base_code
+    if variant_code:
+        full_code = f"{base_code} {variant_code}".strip()
+
+    return {
+        "base_code": base_code,
+        "variant_code": variant_code,
+        "full_code": full_code,
+        "base_compact": _compact_alnum(base_code),
+        "variant_compact": _compact_alnum(variant_code),
+        "full_compact": _compact_alnum(full_code),
+        "finish_label": _format_finish_label(variant_code),
+    }
+
+
+def _get_item_code_metadata(item):
+    cache_key = id(item)
+    cached = item_code_meta_cache.get(cache_key)
+    if isinstance(cached, dict) and cached.get("full_code") is not None:
+        return cached
+
+    for raw in (
+        item.get("code", ""),
+        item.get("name", ""),
+        str(item.get("text", "")).split("\n")[0],
+    ):
+        meta = _parse_code_metadata(raw)
+        if meta["base_code"]:
+            item["base_code"] = meta["base_code"]
+            item["variant_code"] = meta["variant_code"]
+            item["search_code"] = meta["full_code"]
+            if meta["finish_label"] and not item.get("finish_label"):
+                item["finish_label"] = meta["finish_label"]
+            item_code_meta_cache[cache_key] = meta
+            return meta
+
+    empty = _parse_code_metadata("")
+    item_code_meta_cache[cache_key] = empty
+    return empty
+
+
+def _enrich_items_for_search(items):
+    for item in items:
+        _get_item_code_metadata(item)
+
+
+def _item_quality_bonus(item) -> float:
+    bonus = 0.0
+    price = str(item.get("price") or "").strip()
+    name = str(item.get("name") or "").strip()
+
+    if price and price != "0":
+        bonus += 60.0
+    else:
+        bonus -= 80.0
+
+    if item.get("images"):
+        bonus += 18.0
+
+    if " - " in name:
+        bonus += 10.0
+    if "+ -" in name or name.endswith(" +"):
+        bonus -= 45.0
+    if len(name) >= 24:
+        bonus += 6.0
+
+    return bonus
 
 
 def _sanitize_item_images(items):
@@ -128,7 +347,7 @@ def save_index():
             print(f"Warning: failed to sync index to cloud storage: {e}")
 
 def load_index():
-    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache
+    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache
     if not os.path.exists(INDEX_FILE) and cloud_storage.is_enabled():
         try:
             restored = cloud_storage.download_to_path(
@@ -148,6 +367,9 @@ def load_index():
                 stored_items = data.get("stored_items", [])
                 keyword_index = data.get("keyword_index", {})
             print(f"Index loaded: {len(stored_items)} items")
+
+            item_code_meta_cache = {}
+            _enrich_items_for_search(stored_items)
 
             # Strip bad/wrong product images (cover logos, tiny icons, missing files)
             _sanitize_item_images(stored_items)
@@ -188,12 +410,13 @@ def _rebuild_faiss_background():
         print(f"FAISS rebuild failed: {e}")
 
 def reset_index():
-    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache
+    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache
     stored_items   = []
     keyword_index  = {}
     vector_index   = None
     search_cache   = {}
     catalog_summary_cache = None
+    item_code_meta_cache = {}
     if os.path.exists(INDEX_FILE):
         os.remove(INDEX_FILE)
     if cloud_storage.is_enabled():
@@ -365,6 +588,7 @@ def add_to_index(_unused_embeddings, items):
     global stored_items, keyword_index, vector_index, search_cache
 
     search_cache = {}
+    _enrich_items_for_search(items)
     start_idx = len(stored_items)
     stored_items.extend(items)
 
@@ -397,6 +621,19 @@ def add_to_index(_unused_embeddings, items):
                 words_to_index.add(norm_tok)
             if len(compact_tok) >= 3:
                 words_to_index.add(compact_tok)
+
+        code_meta = _get_item_code_metadata(item)
+        for meta_key in ("base_code", "variant_code", "full_code"):
+            meta_value = code_meta.get(meta_key, "")
+            if not meta_value:
+                continue
+            words_to_index.add(meta_value.lower())
+            compact_value = _compact_alnum(meta_value)
+            normalized_value = _normalize(meta_value, strip_in=True)
+            if len(compact_value) >= 3:
+                words_to_index.add(compact_value)
+            if len(normalized_value) >= 3:
+                words_to_index.add(normalized_value)
 
         # 3. Add normalized name and first text slice for combined code-name queries
         norm_name = _normalize(name, strip_in=True)
@@ -458,10 +695,18 @@ def search(query: str, smart: bool = False, brand: str = None):
     query_model_tokens = _extract_model_tokens(query)
     query_model_norms = {_normalize(tok, strip_in=True) for tok in query_model_tokens if len(tok) >= 2}
     query_compact = _compact_alnum(query)
+    query_code_meta = _parse_code_metadata(query)
+    query_base_compact = query_code_meta.get("base_compact", "")
+    query_variant_compact = query_code_meta.get("variant_compact", "")
+    query_full_compact = query_code_meta.get("full_compact", "")
 
     # Prefer an explicit code-like token from the query (e.g. "kohler K-28220T-SL-0").
     strict_query_compact = ""
+    if query_full_compact:
+        strict_query_compact = query_full_compact
     for tok in query_model_tokens:
+        if strict_query_compact:
+            break
         tok_compact = _compact_alnum(tok)
         if len(tok_compact) >= 3 and bool(re.search(r'[a-z]', tok_compact)) and bool(re.search(r'\d', tok_compact)):
             strict_query_compact = tok_compact
@@ -488,6 +733,16 @@ def search(query: str, smart: bool = False, brand: str = None):
     for model_norm in query_model_norms:
         if len(model_norm) >= 3:
             lookup_keys.add(model_norm)
+    for meta_value in (
+        query_code_meta.get("base_code", ""),
+        query_code_meta.get("variant_code", ""),
+        query_code_meta.get("full_code", ""),
+        query_base_compact,
+        query_variant_compact,
+        query_full_compact,
+    ):
+        if len(str(meta_value or "").strip()) >= 1:
+            lookup_keys.add(str(meta_value).lower())
 
     for key in lookup_keys:
         if key in keyword_index:
@@ -526,6 +781,7 @@ def search(query: str, smart: bool = False, brand: str = None):
         strict_scores = {}
         for idx in indices_list:
             item = stored_items[idx]
+            item_code_meta = _get_item_code_metadata(item)
             name_lower = str(item.get("name") or "").lower()
             text_lower = str(item.get("text") or "").lower()
             # Restrict strict matching to header lines before "MRP" to avoid price-number noise.
@@ -549,6 +805,25 @@ def search(query: str, smart: bool = False, brand: str = None):
                 if len(tok_compact) >= 3:
                     token_compacts.append(tok_compact)
             best = 0.0
+            quality_bonus = _item_quality_bonus(item)
+
+            if query_full_compact and item_code_meta.get("full_compact"):
+                item_full_compact = item_code_meta["full_compact"]
+                if item_full_compact == query_full_compact:
+                    best = max(best, 3700.0 + quality_bonus)
+                elif _code_relaxed(item_full_compact) == _code_relaxed(query_full_compact):
+                    best = max(best, 3620.0 + quality_bonus)
+
+            if query_base_compact and item_code_meta.get("base_compact") == query_base_compact:
+                if query_variant_compact:
+                    if item_code_meta.get("variant_compact") == query_variant_compact:
+                        best = max(best, 3520.0 + quality_bonus)
+                    elif item_code_meta.get("variant_compact"):
+                        best = max(best, 2380.0 + quality_bonus)
+                    else:
+                        best = max(best, 2250.0 + quality_bonus)
+                else:
+                    best = max(best, 3040.0 + quality_bonus)
 
             # Highest confidence: exact compact token equality (with OCR-tolerant equivalent).
             has_exact_code = any(
@@ -557,7 +832,7 @@ def search(query: str, smart: bool = False, brand: str = None):
             )
             if has_exact_code:
                 line_exact = any(_compact_alnum(line) == query_code for line in header_lines[:4])
-                best = max(best, 3000.0 + (80.0 if line_exact else 0.0))
+                best = max(best, 3000.0 + (80.0 if line_exact else 0.0) + quality_bonus)
 
             if best == 0 and query_is_numeric:
                 # Numeric-only search: allow exact numeric segment only (not broad substring).
@@ -569,7 +844,7 @@ def search(query: str, smart: bool = False, brand: str = None):
                         break
                 if seg_match:
                     line_has = any(re.search(rf'(^|\D){re.escape(query_code)}(\D|$)', line) for line in header_lines[:4])
-                    best = max(best, 1700.0 + (60.0 if line_has else 0.0))
+                    best = max(best, 1700.0 + (60.0 if line_has else 0.0) + quality_bonus)
 
             if best > 0:
                 strict_scores[idx] = best
@@ -593,7 +868,8 @@ def search(query: str, smart: bool = False, brand: str = None):
                     unique_candidates.append(cand)
 
             # Return at most 2 distinct variants (like 2 distinct colors), but normally just 1.
-            results = unique_candidates[:2]
+            max_exact_results = 1 if query_variant_compact else 2
+            results = unique_candidates[:max_exact_results]
             
             search_cache[cache_key] = results
             return results
@@ -611,6 +887,7 @@ def search(query: str, smart: bool = False, brand: str = None):
     
     for idx in indices_list:
         item = stored_items[idx]
+        item_code_meta = _get_item_code_metadata(item)
         name_lower = str(item.get("name") or "").lower()
         text_lower = str(item.get("text") or "").lower()
         combined = f"{name_lower}\n{text_lower}"
@@ -632,7 +909,18 @@ def search(query: str, smart: bool = False, brand: str = None):
                     s += 300.0
                 elif len(tok_norm) >= 3 and tok_norm in combined_code_norm:
                     s += 280.0
-        
+
+        if query_base_compact and item_code_meta.get("base_compact") == query_base_compact:
+            s += 260.0
+        if query_full_compact and item_code_meta.get("full_compact") == query_full_compact:
+            s += 520.0
+        if query_variant_compact:
+            item_variant_compact = item_code_meta.get("variant_compact")
+            if item_variant_compact == query_variant_compact:
+                s += 340.0
+            elif item_variant_compact:
+                s -= 180.0
+
         # Priority 3: Name / first-line / text relevance
         if query_lower in name_lower:
             s += 380.0
@@ -651,6 +939,8 @@ def search(query: str, smart: bool = False, brand: str = None):
         # Bonus when every query token is present.
         if query_words and all(w in combined for w in query_words):
             s += 140.0
+
+        s += _item_quality_bonus(item)
 
         if s > 0:
             scores[idx] = s
@@ -698,6 +988,18 @@ def search(query: str, smart: bool = False, brand: str = None):
                 continue
 
         filtered_items.append((item, score))
+
+    if is_code_query and query_variant_compact:
+        exact_variant_items = []
+        for item, score in filtered_items:
+            item_code_meta = _get_item_code_metadata(item)
+            if (
+                item_code_meta.get("variant_compact") == query_variant_compact
+                or item_code_meta.get("full_compact") == query_full_compact
+            ):
+                exact_variant_items.append((item, score))
+        if exact_variant_items:
+            filtered_items = exact_variant_items
         
     max_results = fuzzy_max
 
@@ -800,10 +1102,16 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
     if not query or len(query.strip()) < 2:
         return []
 
+    if not stored_items:
+        load_index()
+    if not stored_items:
+        return []
+
     q = query.strip().lower()
     q_words = [w for w in re.split(r'[\s\-\/]+', q) if len(w) >= 2]
     if not q_words:
         return []
+    query_code_meta = _parse_code_metadata(query)
 
     # Fast retrieval using keyword index
     potential_indices = set()
@@ -831,6 +1139,7 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
 
         name = item.get("name", "")
         if not name: continue
+        item_code_meta = _get_item_code_metadata(item)
         
         name_lower = name.lower()
         
@@ -838,22 +1147,39 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         score = 0
         if q in name_lower: score += 10
         if any(w in name_lower for w in q_words): score += 5
+        if query_code_meta.get("base_compact") and item_code_meta.get("base_compact") == query_code_meta["base_compact"]:
+            score += 30
+        if query_code_meta.get("full_compact") and item_code_meta.get("full_compact") == query_code_meta["full_compact"]:
+            score += 45
+        if query_code_meta.get("variant_compact"):
+            if item_code_meta.get("variant_compact") == query_code_meta["variant_compact"]:
+                score += 25
+            elif item_code_meta.get("variant_compact"):
+                score -= 10
+        score += _item_quality_bonus(item)
         
         # Use a more descriptive text for the suggestion key
-        display_text = name.split(" - ")[0].strip()
+        display_text = item_code_meta.get("full_code") or name.split(" - ")[0].strip()
         full_display = name.strip()
         if not display_text: continue
         
-        key = full_display.lower()
+        key = f"{str(item.get('brand') or '').lower()}|{display_text.lower()}"
+        entry = {
+            "score": score,
+            "code": display_text,
+            "full_name": full_display,
+            "brand": item.get("brand", "Aquant"),
+            "image_list": item.get("images", [])
+        }
         if key not in seen:
-            suggestions.append({
-                "score": score,
-                "code": display_text,
-                "full_name": full_display,
-                "brand": item.get("brand", "Aquant"),
-                "image_list": item.get("images", [])
-            })
+            suggestions.append(entry)
             seen.add(key)
+        else:
+            for i, existing in enumerate(suggestions):
+                existing_key = f"{str(existing.get('brand') or '').lower()}|{str(existing.get('code') or '').lower()}"
+                if existing_key == key and score > existing.get("score", 0):
+                    suggestions[i] = entry
+                    break
         
         if len(suggestions) > 50: break
 
@@ -875,4 +1201,3 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         })
         
     return final_results
-
