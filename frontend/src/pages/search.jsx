@@ -52,17 +52,16 @@ const saveCachedSearch = (query, brand, results) => {
 };
 
 export default function Search({ cart, setCart, setFooterVisible }) {
-  const storedUi = getStoredSearchUi();
-  const [query, setQuery] = useState(() => storedUi.query || '');
+  const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [selectedBrand, setSelectedBrand] = useState(() => storedUi.selectedBrand || 'all');
+  const [selectedBrand, setSelectedBrand] = useState('all');
   const [viewProduct, setViewProduct] = useState(null);
   const [failedImages, setFailedImages] = useState({});
-  const [selectedVariants, setSelectedVariants] = useState(() => storedUi.selectedVariants || {});
-  const [searchMode, setSearchMode] = useState(() => storedUi.searchMode || 'idle');
+  const [selectedVariants, setSelectedVariants] = useState({});
+  const [searchMode, setSearchMode] = useState('idle');
   const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine));
   const suggestionRef = useRef(null);
   const lastBrandRef = useRef(selectedBrand);
@@ -106,7 +105,6 @@ export default function Search({ cart, setCart, setFooterVisible }) {
         .then(res => {
           const list = res.data.suggestions || [];
           setSuggestions(list);
-          if (list.length > 0) setShowSuggestions(true);
         })
         .catch(() => setSuggestions([]));
     }, 250);
@@ -127,12 +125,11 @@ export default function Search({ cart, setCart, setFooterVisible }) {
 
   useEffect(() => {
     writeJson(SEARCH_UI_KEY, {
-      query,
       selectedBrand,
       selectedVariants,
       searchMode,
     });
-  }, [query, selectedBrand, selectedVariants, searchMode]);
+  }, [selectedBrand, selectedVariants, searchMode]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -306,7 +303,10 @@ export default function Search({ cart, setCart, setFooterVisible }) {
             className="sp-search-input"
             placeholder="e.g. 9272, K-28362IN, Shower Mixer..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setShowSuggestions(true);
+            }}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
           />

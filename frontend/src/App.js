@@ -33,8 +33,7 @@ function getStandaloneMode() {
 }
 
 function getInitialPage() {
-  const storedPage = readString(APP_STATE_KEYS.page, 'dashboard');
-  return ALLOWED_PAGES.has(storedPage) ? storedPage : 'dashboard';
+  return 'dashboard';
 }
 
 function getInitialCart() {
