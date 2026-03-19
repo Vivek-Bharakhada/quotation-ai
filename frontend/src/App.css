@@ -316,6 +316,49 @@ body {
   color: var(--text-secondary);
 }
 
+/* Hamburger Menu - Hidden by default */
+.hamburger-menu {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.35rem;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-color);
+  border-radius: 0.68rem;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-left: auto;
+  margin-right: 0.25rem;
+}
+
+.hamburger-menu span {
+  width: 24px;
+  height: 2px;
+  background: var(--text-primary);
+  border-radius: 2px;
+  transition: all 0.3s ease;
+}
+
+.hamburger-menu:hover {
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent 88%);
+  border-color: var(--primary-color);
+}
+
+.hamburger-menu[aria-expanded="true"] span:nth-child(1) {
+  transform: rotate(45deg) translate(8px, 8px);
+}
+
+.hamburger-menu[aria-expanded="true"] span:nth-child(2) {
+  opacity: 0;
+}
+
+.hamburger-menu[aria-expanded="true"] span:nth-child(3) {
+  transform: rotate(-45deg) translate(8px, -8px);
+}
+
 .install-btn:hover,
 .nav-icon-btn:hover {
   transform: translateY(-1px);
@@ -505,6 +548,53 @@ body {
     padding: 0.5rem 0.72rem;
     font-size: 0.76rem;
     border-radius: 0.64rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .hamburger-menu {
+    display: flex;
+  }
+
+  .nav-links {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 0 0 1rem 1rem;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.5rem;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    z-index: 100;
+    order: unset;
+    width: unset;
+    justify-content: unset;
+    margin-top: 0.35rem;
+  }
+
+  .nav-links.mobile-open {
+    max-height: 300px;
+    opacity: 1;
+  }
+
+  .nav-link-btn {
+    width: 100%;
+    text-align: left;
+    padding: 0.7rem 0.8rem;
+    font-size: 0.85rem;
+    border-radius: 0.56rem;
+  }
+
+  .nav-link-btn.active {
+    background: var(--primary-gradient);
+    color: #ffffff;
   }
 }
 

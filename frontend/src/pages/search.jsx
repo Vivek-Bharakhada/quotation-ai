@@ -282,7 +282,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
           <p className="sp-hero-subtitle">Search through thousands of premium bathroom fittings and tiles</p>
         </div>
         <div className="sp-hero-visual">
-          <img src="/hero.png" alt="Luxury Bathroom" className="sp-hero-img" />
+          <img src="/hero.png" alt="Luxury Bathroom" loading="lazy" className="sp-hero-img" />
         </div>
       </header>
 
@@ -326,7 +326,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
               >
                 <div className="sp-sugg-left">
                   {s.image ? (
-                    <img src={resolveAssetUrl(s.image)} alt="" className="sp-sugg-img" />
+                    <img src={resolveAssetUrl(s.image)} alt="" loading="lazy" className="sp-sugg-img" />
                   ) : (
                     <div className="sp-sugg-no-img">NO IMG</div>
                   )}
@@ -378,7 +378,7 @@ export default function Search({ cart, setCart, setFooterVisible }) {
             >
               <div className="sp-media">
                 {hasImage ? (
-                  <img src={imageSrc} alt="Product" onError={() => markImageFailed(imageSrc)} />
+                  <img src={imageSrc} alt="Product" loading="lazy" onError={() => markImageFailed(imageSrc)} />
                 ) : (
                   <div className="sp-no-preview">IMAGE NOT FOUND</div>
                 )}

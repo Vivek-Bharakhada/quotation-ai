@@ -806,11 +806,20 @@
     flex: 1;
     text-align: center;
     padding: 0.62rem 0.4rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .sp-search-shell {
     padding: 0.7rem;
     gap: 0.6rem;
+  }
+
+  .sp-search-btn {
+    min-height: 44px;
+    padding: 0.72rem 1rem;
   }
 
   .sp-suggestions-list {
@@ -821,6 +830,8 @@
   .sp-suggestion-item {
     align-items: flex-start;
     gap: 0.6rem;
+    min-height: 60px;
+    padding: 0.75rem;
   }
 
   .sp-sugg-left {
@@ -839,6 +850,7 @@
 
   .sp-search-input {
     padding: 0.88rem 0.9rem;
+    min-height: 44px;
   }
 
   .sp-grid {
@@ -848,5 +860,147 @@
 
   .sp-media {
     height: 186px;
+  }
+
+  .sp-add-btn,
+  .sp-info-btn {
+    min-height: 44px;
+    padding: 0.88rem 0.9rem;
+    border-radius: 0.72rem;
+    font-size: 0.8rem;
+  }
+
+  .sp-actions {
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .sp-root {
+    padding: 0.6rem;
+    border-radius: 1rem;
+  }
+
+  .sp-head {
+    margin-bottom: 0.8rem;
+  }
+
+  .sp-head h1 {
+    font-size: 1.5rem;
+  }
+
+  .sp-brand-wrap {
+    margin-bottom: 0.8rem;
+  }
+
+  .sp-brand-btn {
+    padding: 0.56rem 0.3rem;
+    font-size: 0.75rem;
+    min-height: 40px;
+  }
+
+  .sp-search-shell {
+    padding: 0.6rem;
+    flex-direction: column;
+  }
+
+  .sp-search-input {
+    padding: 0.8rem 0.8rem;
+    font-size: 0.95rem;
+    min-height: 44px;
+  }
+
+  .sp-search-btn {
+    width: 100%;
+    min-height: 46px;
+    font-size: 0.8rem;
+    padding: 0.8rem 1.2rem;
+  }
+
+  .sp-grid {
+    gap: 0.6rem;
+  }
+
+  .sp-card {
+    border-radius: 0.8rem;
+  }
+
+  .sp-media {
+    height: 160px;
+    border-radius: 0.72rem;
+  }
+
+  .sp-card-body {
+    padding: 0.6rem;
+    gap: 0.5rem;
+  }
+
+  .sp-meta-pill {
+    font-size: 0.65rem;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .sp-card-title {
+    font-size: 0.85rem;
+    line-height: 1.3;
+  }
+
+  .sp-price {
+    font-size: 0.8rem;
+  }
+
+  .sp-add-btn,
+  .sp-info-btn {
+    min-height: 44px;
+    padding: 0.72rem 0.68rem;
+    font-size: 0.75rem;
+    border-radius: 0.6rem;
+  }
+
+  .sp-actions {
+    gap: 0.4rem;
+  }
+
+  .sp-selects-group {
+    gap: 0.4rem;
+  }
+
+  .sp-select {
+    padding: 0.6rem 0.56rem;
+    font-size: 0.75rem;
+  }
+
+  .sp-suggestions-list {
+    max-height: 400px;
+    padding: 0.6rem;
+  }
+
+  .sp-suggestion-item {
+    padding: 0.6rem;
+    gap: 0.5rem;
+    min-height: 56px;
+  }
+
+  .sp-sugg-left {
+    gap: 0.6rem;
+  }
+
+  .sp-sugg-img {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+  }
+
+  .sp-sugg-text {
+    font-size: 0.9rem;
+  }
+
+  .sp-sugg-desc {
+    font-size: 0.75rem;
+  }
+
+  .sp-sugg-brand {
+    font-size: 0.6rem;
+    padding: 0.3rem 0.7rem;
   }
 }

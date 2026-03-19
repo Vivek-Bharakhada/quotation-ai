@@ -74,6 +74,7 @@ def index_local_catalogs(force=False):
         print("--- BACKGROUND INDEXING START ---")
         search_engine.reset_index()  # Clean all stored data and AI vectors
 
+        total_indexed = 0
         for filename in files:
             if "aquant" in filename.lower():
                 brand = "Aquant"
@@ -87,13 +88,21 @@ def index_local_catalogs(force=False):
             path = os.path.join(upload_dir, filename)
             try:
                 items = extract_content(path)
+                # Set brand on all items before indexing
+                for item in items:
+                    if "brand" not in item or not item["brand"]:
+                        item["brand"] = brand
                 search_engine.add_to_index(None, items)
-                print(f"Indexed: {filename} as {brand}")
+                total_indexed += len(items)
+                print(f"✓ Indexed: {len(items)} items from {filename} as {brand}")
             except Exception as e:
-                print(f"Error indexing {filename}: {e}")
+                print(f"✗ Error indexing {filename}: {e}")
+                import traceback
+                traceback.print_exc()
 
-        print(f"--- BACKGROUND INDEXING COMPLETE ---")
-        search_engine.load_index()
+        # Ensure index is saved
+        search_engine.save_index()
+        print(f"--- BACKGROUND INDEXING COMPLETE: {total_indexed} items indexed ---")
     finally:
         index_local_catalogs._running = False
 

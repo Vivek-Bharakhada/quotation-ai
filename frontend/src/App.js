@@ -60,10 +60,12 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiBaseInput, setApiBaseInput] = useState(() => getApiBase());
   const [apiOverrideActive, setApiOverrideActive] = useState(() => hasApiBaseOverride());
+  const [menuOpen, setMenuOpen] = useState(false);
   const pageViewClass = `${currentPage}-view`;
 
   useEffect(() => {
     writeString(APP_STATE_KEYS.page, currentPage);
+    setMenuOpen(false);
   }, [currentPage]);
 
   useEffect(() => {
@@ -227,7 +229,18 @@ function App() {
             </div>
           </div>
 
-          <div className="nav-links">
+          <button
+            className="hamburger-menu"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Toggle navigation menu"
+            aria-expanded={menuOpen}
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+
+          <div className={`nav-links ${menuOpen ? 'mobile-open' : ''}`}>
             <button
               className={`nav-link-btn ${currentPage === 'dashboard' ? 'active' : ''}`}
               onClick={() => setCurrentPage('dashboard')}
