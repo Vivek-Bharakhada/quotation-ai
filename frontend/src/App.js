@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './App.css';
-import Search from './pages/search';
 import Quotation from './pages/quotation';
 import Dashboard from './pages/dashboard';
 
@@ -35,8 +34,8 @@ function getInitialPage() {
 }
 
 function getInitialCart() {
-  const storedCart = readJson(APP_STATE_KEYS.cart, []);
-  return Array.isArray(storedCart) ? storedCart : [];
+  // We no longer restore the cart on refresh to keep the app fresh as per user request
+  return [];
 }
 
 function getInitialTheme() {
@@ -192,20 +191,15 @@ function App() {
             setCart={setCart}
           />
         );
-      case 'search':
-        return (
-          <Search
-            cart={cart}
-            setCart={setCart}
-            externalSearch={externalSearch}
-            setExternalSearch={setExternalSearch}
-            setFooterVisible={setFooterVisible}
-          />
-        );
       case 'quotation':
         return <Quotation cart={cart} />;
       default:
-        return <Search cart={cart} setCart={setCart} setFooterVisible={setFooterVisible} />;
+        return <Dashboard 
+            setCurrentPage={setCurrentPage}
+            setExternalSearch={setExternalSearch}
+            cart={cart}
+            setCart={setCart}
+        />;
     }
   };
 
@@ -243,12 +237,6 @@ function App() {
               onClick={() => setCurrentPage('dashboard')}
             >
               Dashboard
-            </button>
-            <button
-              className={`nav-link-btn ${currentPage === 'search' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('search')}
-            >
-              Search Products
             </button>
             <button
               className={`nav-link-btn ${currentPage === 'quotation' ? 'active' : ''}`}
@@ -315,17 +303,7 @@ function App() {
         )}
       </main>
 
-      {cart.length > 0 && currentPage === 'search' && (
-        <div
-          className="floating-cart"
-          onClick={() => setCurrentPage('quotation')}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          <span>Cart: {cart.length} Item{cart.length > 1 ? 's' : ''} Added</span>
-          <span className="floating-cart-pill">View &rarr;</span>
-        </div>
-      )}
+      {/* Cart floating badge removed as search page is removed */}
 
       {settingsOpen && (
         <div className="app-modal-overlay" onClick={() => setSettingsOpen(false)}>

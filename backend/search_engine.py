@@ -78,7 +78,7 @@ STATIC_IMAGES_DIR = os.path.join(BASE_DIR, "static", "images")
 _MIN_PRODUCT_IMAGE_SIZE = 8000
 
 _LEADING_CODE_WITH_VARIANT_RE = re.compile(
-    r'^\s*((?:[A-Z]{1,4}-\d[A-Z0-9-]*|\d[\d-]*))(?:\s+([A-Z0-9+]{1,12}))?',
+    r'^\s*((?:[A-Z]{1,4}-\d[A-Z0-9\+\-\ ]*|\d[A-Z0-9\+\-\ ]*))(?:\s+([A-Z0-9+]{1,12}))?',
     re.IGNORECASE,
 )
 _KNOWN_FINISH_LABELS = {
@@ -465,7 +465,7 @@ def _is_code_or_model_query(query: str) -> bool:
     q = (query or "").strip().lower()
     if not q:
         return False
-    tokens = re.findall(r'[a-z0-9/-]+', q)
+    tokens = re.findall(r'[a-z0-9/\-\+]+', q)
     if not tokens:
         return False
 
@@ -1129,6 +1129,9 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
     brand_lower = (brand or "").strip().lower()
     is_all_brand = (not brand_lower) or (brand_lower == "all")
 
+    # Also index with the full query as a compact token for direct matching
+    q_compact = _compact_alnum(q)
+
     # Score and rank candidates
     for idx in potential_indices:
         item = stored_items[idx]
@@ -1142,6 +1145,7 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         item_code_meta = _get_item_code_metadata(item)
         
         name_lower = name.lower()
+        name_compact = _compact_alnum(name)
         
         # Simple scoring
         score = 0
@@ -1150,16 +1154,27 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         if query_code_meta.get("base_compact") and item_code_meta.get("base_compact") == query_code_meta["base_compact"]:
             score += 30
         if query_code_meta.get("full_compact") and item_code_meta.get("full_compact") == query_code_meta["full_compact"]:
-            score += 45
+            score += 150 # Significantly boost exact code matches in suggestions
         if query_code_meta.get("variant_compact"):
             if item_code_meta.get("variant_compact") == query_code_meta["variant_compact"]:
                 score += 25
             elif item_code_meta.get("variant_compact"):
                 score -= 10
+
+        # Boost items where the full query string appears in name (e.g. "450-1003" in "450-1003 G - Gold")
+        if len(q) >= 3 and q in name_lower:
+            score += 200
+        # Also boost if query compact matches the start of item name compact
+        if q_compact and len(q_compact) >= 3 and name_compact.startswith(q_compact):
+            score += 250
+
         score += _item_quality_bonus(item)
         
-        # Use a more descriptive text for the suggestion key
-        display_text = item_code_meta.get("full_code") or name.split(" - ")[0].strip()
+        # Use item name for display to preserve prefixes like "450-" that code parsing might separate
+        name_parts = name.split(" - ", 1)
+        display_text = name_parts[0].strip()
+        if not display_text:
+            display_text = item_code_meta.get("full_code") or name.split(" - ")[0].strip()
         full_display = name.strip()
         if not display_text: continue
         
@@ -1169,7 +1184,8 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
             "code": display_text,
             "full_name": full_display,
             "brand": item.get("brand", "Aquant"),
-            "image_list": item.get("images", [])
+            "image_list": item.get("images", []),
+            "item": item
         }
         if key not in seen:
             suggestions.append(entry)
@@ -1194,10 +1210,11 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         name_desc = parts[1].strip() if len(parts) > 1 else ""
         
         final_results.append({
-            "text": code,
+            "text": s["code"],
             "description": name_desc,
             "brand": s["brand"],
-            "image": s["image_list"][0] if s["image_list"] else None
+            "image": s["image_list"][0] if s["image_list"] else None,
+            "raw_item": s["item"]
         })
         
     return final_results

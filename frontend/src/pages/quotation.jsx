@@ -3,6 +3,7 @@ import axios from 'axios';
 import './quotation.css';
 
 import BASE from '../api';
+import InlineSearch from './InlineSearch';
 import { readJson, writeJson } from '../utils/storage';
 import { resolveAssetUrl } from '../utils/url';
 
@@ -80,26 +81,27 @@ async function notifyQuoteReady(quoteNumber, grandTotal) {
 
 
 export default function Quotation({ cart }) {
-  const storedDraft = loadStoredDraft();
-  const [client, setClient] = useState(() => storedDraft?.client || blankClient);
-  const [showGstInput, setShowGstInput] = useState(() => Boolean(storedDraft?.showGstInput || storedDraft?.client?.gst));
-  const [items, setItems] = useState(() => storedDraft?.items?.length ? storedDraft.items : mapCartToItems(cart));
-  const [discountPercent, setDiscountPercent] = useState(() => storedDraft?.discountPercent ?? 0);
-  const [gstRate, setGstRate] = useState(() => storedDraft?.gstRate ?? 18);
+  // We no longer restore the draft on mount to ensure the page feels fresh on reload
+  const [client, setClient] = useState(blankClient);
+  const [showGstInput, setShowGstInput] = useState(false);
+  const [items, setItems] = useState(() => mapCartToItems(cart));
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [gstRate, setGstRate] = useState(18);
   const [quoteHistory, setQuoteHistory] = useState(() => normalizeQuoteHistory(readJson(QUOTE_HISTORY_CACHE_KEY, [])));
-  const [generatedPdfUrl, setGeneratedPdfUrl] = useState(() => storedDraft?.generatedPdfServerUrl || null);
-  const [generatedPdfServerUrl, setGeneratedPdfServerUrl] = useState(() => storedDraft?.generatedPdfServerUrl || '');
-  const [generatedPdfServerName, setGeneratedPdfServerName] = useState(() => storedDraft?.generatedPdfServerName || '');
-  const [quoteNumber, setQuoteNumber] = useState(() => storedDraft?.quoteNumber || '');
-  const [quoteDate, setQuoteDate] = useState(() => storedDraft?.quoteDate || '');
-  const [showBgLogo, setShowBgLogo] = useState(() => Boolean(storedDraft?.showBgLogo));
-  const [madeBy, setMadeBy] = useState(() => storedDraft?.madeBy || '');
-  const [madeByPhone, setMadeByPhone] = useState(() => storedDraft?.madeByPhone || '');
-  const [madeByEmail, setMadeByEmail] = useState(() => storedDraft?.madeByEmail || '');
+  const [generatedPdfUrl, setGeneratedPdfUrl] = useState(null);
+  const [generatedPdfServerUrl, setGeneratedPdfServerUrl] = useState('');
+  const [generatedPdfServerName, setGeneratedPdfServerName] = useState('');
+  const [quoteNumber, setQuoteNumber] = useState('');
+  const [quoteDate, setQuoteDate] = useState('');
+  const [showBgLogo, setShowBgLogo] = useState(false);
+  const [madeBy, setMadeBy] = useState('');
+  const [madeByPhone, setMadeByPhone] = useState('');
+  const [madeByEmail, setMadeByEmail] = useState('');
   const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine));
   const [notificationPermission, setNotificationPermission] = useState(() =>
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
 
   const staffOptions = [
     { name: 'Harsh Bhai', phone: '+91 82385 21277' },
@@ -120,6 +122,23 @@ export default function Quotation({ cart }) {
       setMadeByPhone(staff.phone);
     }
   };
+
+  // Keyboard shortcut for Catalog Sync (Shift + R)
+  useEffect(() => {
+    const handleKeyDown = async (e) => {
+      if (e.shiftKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        try {
+          const res = await axios.get(`${BASE}/refresh`);
+          alert(res.data.message || 'Catalog indexing started in background.');
+        } catch (err) {
+          alert('Catalog sync failed.');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const fetchHistory = async () => {
     try {
@@ -625,11 +644,12 @@ export default function Quotation({ cart }) {
         <div className="qt-header-row">
           <div>
             <h2>Create New Quotation</h2>
-            <p className="qt-header-note">Draft auto-saves locally, so you can continue on refresh or app reopen.</p>
           </div>
-          <button className="qt-reset-btn" onClick={startFreshDraft}>
-            Start Fresh
-          </button>
+          <div className="qt-header-actions">
+            <button className="qt-reset-btn" onClick={startFreshDraft}>
+              Start Fresh
+            </button>
+          </div>
         </div>
       </header>
 
@@ -641,7 +661,7 @@ export default function Quotation({ cart }) {
         </div>
       )}
 
-      <section className="qt-client-grid">
+      <section className="qt-client-grid" style={{ position: 'relative', zIndex: 9999 }}>
         <input
           className="qt-field"
           name="client_name"
@@ -696,9 +716,43 @@ export default function Quotation({ cart }) {
             + Add GSTIN Detail
           </button>
         )}
+
+        <InlineSearch 
+          onAdd={(newItem) => {
+            if (!newItem) return;
+            setItems((prev) => {
+              // Replace the first item if it's completely blank
+              const isFirstBlank = prev.length === 1 && !prev[0].name && !prev[0].price && !prev[0].rawText && !prev[0].sku;
+              if (isFirstBlank) {
+                return [newItem];
+              }
+              return [...prev, newItem];
+            });
+            
+            // Visual feedback
+            const toast = document.createElement('div');
+            toast.textContent = `Added: ${newItem.name || 'Product'}`;
+            toast.style.cssText = `
+              position: fixed; bottom: 30px; right: 30px;
+              background: #10b981; color: white; padding: 12px 24px;
+              border-radius: 12px; font-weight: 600; z-index: 10002;
+              box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+              transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+              transform: translateY(0);
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+              toast.style.opacity = '0';
+              toast.style.transform = 'translateY(20px)';
+              setTimeout(() => {
+                if (document.body.contains(toast)) document.body.removeChild(toast);
+              }, 400);
+            }, 2500);
+          }} 
+        />
       </section>
 
-      <section className="qt-items-section">
+      <section className="qt-items-section" style={{ position: 'relative', zIndex: 1 }}>
         <div className="qt-items-head">
           <h3>Itemized List</h3>
           <button onClick={addItem} className="qt-add-row">
@@ -979,49 +1033,90 @@ export default function Quotation({ cart }) {
 
       <section className="qt-history">
         <div className="qt-history-line" />
-        <h3 className="qt-history-title">
-          Past Records
-          <span>{quoteHistory.length} files</span>
-        </h3>
-
-        {quoteHistory.length > 0 ? (
-          <div className="qt-history-grid">
-            {quoteHistory.map((q) => (
-              <article key={q.id} className="qt-record-card">
-                <div className="qt-record-head">
-                  <div className="qt-record-meta">
-                    <div className="qt-record-client">{q.client}</div>
-                    <div className="qt-record-time">
-                      {new Date(q.date * 1000).toLocaleDateString()} {' | '}
-                      {new Date(q.date * 1000).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </div>
-                  </div>
-                  <div className="qt-record-total">Rs {q.total.toLocaleString()}</div>
-                </div>
-
-                <div className="qt-record-actions">
-                  <button onClick={() => loadQuote(q.id)} className="qt-resume-btn">
-                    RESUME EDIT
-                  </button>
-                  <button onClick={() => deleteQuote(q.id)} className="qt-delete-btn">
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
+        <div className="qt-history-top">
+          <h3 className="qt-history-title">
+            Quotation History
+            <span className="qt-count-pill">{quoteHistory.length} files</span>
+          </h3>
+          <div className="qt-history-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input 
+              type="text" 
+              placeholder="Find client or quote..." 
+              value={historySearchTerm}
+              onChange={(e) => setHistorySearchTerm(e.target.value)}
+            />
           </div>
-        ) : (
-          <div className="qt-history-empty">
-            <p>
-              No quotation records found yet.
-              <br />
-              Generate your first bill to start history tracking.
-            </p>
-          </div>
-        )}
+        </div>
+
+        {(() => {
+          const filtered = quoteHistory.filter(q => 
+            q.client.toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+            (q.id && q.id.toLowerCase().includes(historySearchTerm.toLowerCase()))
+          );
+
+          if (filtered.length === 0) {
+            return (
+              <div className="qt-history-empty">
+                <p>{historySearchTerm ? "No matching records found." : "No quotation records found yet."}</p>
+              </div>
+            );
+          }
+
+          // Grouping logic
+          const now = new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+          const yesterday = today - 86400000;
+
+          const groups = { Today: [], Yesterday: [], Older: [] };
+          filtered.forEach(q => {
+             const ts = q.date * 1000;
+             if (ts >= today) groups.Today.push(q);
+             else if (ts >= yesterday) groups.Yesterday.push(q);
+             else groups.Older.push(q);
+          });
+
+          return Object.entries(groups).map(([label, records]) => {
+            if (records.length === 0) return null;
+            return (
+              <div key={label} className="qt-history-group">
+                <h4 className="qt-group-label">{label}</h4>
+                <div className="qt-records-list">
+                  {records.map(q => {
+                    const initials = (q.client || 'C').charAt(0).toUpperCase();
+                    return (
+                      <article key={q.id} className="qt-record-list-item">
+                        <div className="qt-record-avatar" style={{ '--bg': `hsl(${(initials.charCodeAt(0) * 10) % 360}, 65%, 45%)` }}>
+                          {initials}
+                        </div>
+                        <div className="qt-record-main">
+                          <div className="qt-record-info">
+                            <span className="qt-record-name">{q.client}</span>
+                            <span className="qt-record-date">
+                              📅 {new Date(q.date * 1000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} • 
+                              {new Date(q.date * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="qt-record-amount">
+                            ₹{q.total.toLocaleString('en-IN')}
+                          </div>
+                        </div>
+                        <div className="qt-record-row-actions">
+                          <button onClick={() => loadQuote(q.id)} className="qt-action-icon edit" title="Resume Edit">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                          </button>
+                          <button onClick={() => deleteQuote(q.id)} className="qt-action-icon delete" title="Delete">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          });
+        })()}
       </section>
     </div>
   );
