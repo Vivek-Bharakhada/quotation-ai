@@ -10,7 +10,7 @@ import BASE, {
   hasApiBaseOverride,
   setApiBaseOverride,
 } from './api';
-import { readJson, readString, writeJson, writeString } from './utils/storage';
+import { readString, writeJson, writeString } from './utils/storage';
 
 const APP_STATE_KEYS = {
   cart: 'quotation-ai/cart',
@@ -47,8 +47,6 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [cart, setCart] = useState(getInitialCart);
   const [theme, setTheme] = useState(getInitialTheme);
-  const [externalSearch, setExternalSearch] = useState(null);
-  const [footerVisible, setFooterVisible] = useState(true);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installHelp, setInstallHelp] = useState('');
@@ -186,7 +184,6 @@ function App() {
         return (
           <Dashboard
             setCurrentPage={setCurrentPage}
-            setExternalSearch={setExternalSearch}
             cart={cart}
             setCart={setCart}
           />
@@ -196,7 +193,6 @@ function App() {
       default:
         return <Dashboard 
             setCurrentPage={setCurrentPage}
-            setExternalSearch={setExternalSearch}
             cart={cart}
             setCart={setCart}
         />;
@@ -296,11 +292,9 @@ function App() {
         )}
 
         {renderPage()}
-        {footerVisible && (
-          <footer className="footer">
-            &copy; {new Date().getFullYear()} Shreeji Ceramica | Quotation Management System
-          </footer>
-        )}
+        <footer className="footer">
+          &copy; {new Date().getFullYear()} Shreeji Ceramica | Quotation Management System
+        </footer>
       </main>
 
       {/* Cart floating badge removed as search page is removed */}

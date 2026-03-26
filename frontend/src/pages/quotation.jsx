@@ -46,11 +46,6 @@ const mapCartToItems = (cart = []) =>
       }))
     : [createBlankItem()];
 
-const loadStoredDraft = () => {
-  const stored = readJson(QUOTE_DRAFT_KEY, null);
-  return stored && typeof stored === 'object' ? stored : null;
-};
-
 const normalizeQuoteHistory = (value) => (Array.isArray(value) ? value : []);
 
 async function notifyQuoteReady(quoteNumber, grandTotal) {
