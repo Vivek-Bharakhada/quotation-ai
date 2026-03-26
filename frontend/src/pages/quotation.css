@@ -36,6 +36,12 @@
   flex-wrap: wrap;
 }
 
+.qt-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .qt-header h2 {
   font-size: clamp(1.65rem, 2.9vw, 2.4rem);
   font-weight: 900;
@@ -275,13 +281,13 @@
   max-width: 500px;
   border-collapse: collapse;
   font-family: 'Inter', sans-serif;
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
 }
 
 .qt-room-summary-table th {
-  background: #f8fafc;
-  color: #334155;
+  background: var(--bg-color);
+  color: var(--text-secondary);
   padding: 0.8rem 1rem;
   font-size: 0.85rem;
   font-weight: 700;
@@ -293,29 +299,29 @@
 
 .qt-room-summary-table td {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border-color);
   font-size: 0.85rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-dim);
 }
 
 .qt-room-summary-table td:last-child {
   text-align: right;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .qt-room-summary-table tr:hover td {
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--bg-color) 80%, var(--card-bg));
 }
 
 .qt-room-summary-total {
-  background: #f1f5f9;
+  background: color-mix(in srgb, var(--primary-color) 5%, var(--bg-color));
 }
 
 .qt-room-summary-total td {
   font-weight: 800;
-  color: #0f172a;
+  color: var(--text-primary);
   padding-top: 1rem;
   padding-bottom: 1rem;
   text-transform: uppercase;
@@ -327,34 +333,7 @@
   font-size: 1rem;
 }
 
-.dark-theme .qt-room-summary-table {
-  background: #1e293b;
-  border-color: #334155;
-}
-
-.dark-theme .qt-room-summary-table th {
-  background: #0f172a;
-  color: #cbd5e1;
-  border-bottom-color: #475569;
-}
-
-.dark-theme .qt-room-summary-table td {
-  border-bottom-color: #334155;
-  color: #94a3b8;
-}
-
-.dark-theme .qt-room-summary-table td:last-child {
-  color: #f1f5f9;
-}
-
-.dark-theme .qt-room-summary-total {
-  background: #0f172a;
-}
-
-.dark-theme .qt-room-summary-total td {
-  color: #f8fafc;
-}
-
+/* Overrides removed as CSS variables handle them dynamically */
 /* PDF Options section */
 .qt-pdf-options {
   margin-bottom: 1.2rem;
@@ -795,115 +774,191 @@
   margin-bottom: 1rem;
 }
 
-.qt-history-title {
-  font-size: 1.3rem;
-  font-weight: 900;
+.qt-history-top {
   display: flex;
   align-items: center;
-  gap: 0.66rem;
-  margin-bottom: 0.86rem;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
 }
 
-.qt-history-title span {
+.qt-count-pill {
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text-dim);
   border: 1px solid var(--border-color);
   border-radius: 999px;
-  padding: 0.22rem 0.56rem;
+  padding: 0.22rem 0.6rem;
   background: color-mix(in srgb, var(--bg-color) 90%, #ffffff 10%);
+  margin-left: 0.75rem;
 }
 
-.qt-history-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-  gap: 0.8rem;
-}
-
-.qt-record-card {
-  border: 1px solid var(--border-color);
-  background: color-mix(in srgb, var(--card-bg) 90%, #ffffff 10%);
-  border-radius: 1rem;
-  padding: 0.88rem;
-  transition: transform 0.22s ease, border-color 0.2s ease, box-shadow 0.24s ease;
-}
-
-.qt-record-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
-  box-shadow: 0 20px 34px -28px rgba(15, 23, 42, 0.74);
-}
-
-.qt-record-head {
+.qt-history-search {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: 0.6rem;
-  align-items: flex-start;
-  margin-bottom: 0.72rem;
-}
-
-.qt-record-meta {
-  overflow: hidden;
-}
-
-.qt-record-client {
-  font-size: 0.98rem;
-  font-weight: 900;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.qt-record-time {
-  margin-top: 0.3rem;
+  background: color-mix(in srgb, var(--input-bg) 92%, #ffffff 8%);
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.8rem;
+  min-width: 260px;
   color: var(--text-dim);
-  font-size: 0.74rem;
 }
 
-.qt-record-total {
+.qt-history-search input {
+  background: transparent;
+  border: none;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  width: 100%;
+}
+
+.qt-history-search input:focus {
+  outline: none;
+}
+
+.qt-history-group {
+  margin-bottom: 2rem;
+}
+
+.qt-group-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--primary-color);
-  font-weight: 900;
-  font-size: 1rem;
-}
-
-.qt-record-actions {
+  margin-bottom: 0.8rem;
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.qt-resume-btn,
-.qt-delete-btn {
-  border-radius: 0.72rem;
-  font-size: 0.75rem;
-  font-weight: 800;
-  cursor: pointer;
-  transition: transform 0.2s ease;
-}
-
-.qt-resume-btn {
+.qt-group-label::after {
+  content: '';
+  height: 1px;
   flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: linear-gradient(90deg, var(--border-color), transparent);
+}
+
+.qt-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.qt-record-list-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: color-mix(in srgb, var(--card-bg) 95%, #ffffff 5%);
+  border: 1px solid var(--border-color);
+  padding: 0.75rem 0.9rem;
+  border-radius: 1.1rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.qt-record-list-item:hover {
+  transform: translateX(4px);
+  border-color: color-mix(in srgb, var(--primary-color) 30%, var(--border-color));
+  background: color-mix(in srgb, var(--card-bg) 90%, #ffffff 10%);
+  box-shadow: 0 10px 20px -10px rgba(0,0,0,0.1);
+}
+
+.qt-record-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--bg, #6366f1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  box-shadow: 0 4px 10px -4px var(--bg);
+}
+
+.qt-record-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.qt-record-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.qt-record-name {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.qt-record-date {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 0.15rem;
+}
+
+.qt-record-amount {
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--primary-color);
+  font-family: 'Inter', sans-serif;
+}
+
+.qt-record-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qt-action-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.qt-action-icon.edit {
+  color: var(--text-secondary);
+  background: rgba(14, 165, 233, 0.06);
+  border-color: rgba(14, 165, 233, 0.1);
+}
+
+.qt-action-icon.edit:hover {
   background: var(--primary-gradient);
-  color: #ffffff;
-  padding: 0.64rem 0.72rem;
+  color: white;
+  border-color: transparent;
+  transform: scale(1.08);
 }
 
-.qt-delete-btn {
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.09);
+.qt-action-icon.delete {
   color: #ef4444;
-  padding: 0.64rem 0.86rem;
+  background: rgba(239, 68, 68, 0.06);
 }
 
-.qt-resume-btn:hover,
-.qt-delete-btn:hover {
-  transform: translateY(-1px);
+.qt-action-icon.delete:hover {
+  background: #ef4444;
+  color: white;
+  transform: scale(1.08);
 }
 
 .qt-history-empty {
   border: 1px dashed var(--border-color);
-  border-radius: 1rem;
-  padding: 2rem 1rem;
+  border-radius: 1.2rem;
+  padding: 3.5rem 1rem;
   text-align: center;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--card-bg) 70%, transparent 30%);

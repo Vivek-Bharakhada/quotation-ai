@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pdf_reader import extract_content
 import search_engine
 
-UPLOAD_DIR = r"c:\Users\DELL\OneDrive\Desktop\AIML Project\quotation-ai\backend\uploads"
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 
 def force_reindex_all():
     print("--- STARTING FORCE RE-INDEX ---")

@@ -45,16 +45,16 @@
 }
 
 .sp-hero-title {
-  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-size: clamp(1.8rem, 4vw, 3rem);
   font-weight: 900;
   line-height: 1.1;
   margin-bottom: 1rem;
   letter-spacing: -0.04em;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .sp-hero-title span {
-  background: linear-gradient(135deg, #be1e2d 0%, #ff4b5c 100%);
+  background: var(--primary-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -62,7 +62,7 @@
 
 .sp-hero-subtitle {
   font-size: 1.25rem;
-  color: #475569;
+  color: var(--text-dim);
   font-weight: 500;
   max-width: 450px;
 }
@@ -133,13 +133,10 @@
 }
 
 .sp-search-shell {
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
   border-radius: 2rem;
-  box-shadow: 
-    0 10px 15px -3px rgba(0, 0, 0, 0.1), 
-    0 4px 6px -2px rgba(0, 0, 0, 0.05),
-    inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow);
   padding: 0.6rem;
   display: flex;
   gap: 0.5rem;
@@ -158,9 +155,10 @@
   top: calc(100% + 10px);
   left: 0;
   right: 0;
-  background: #ffffff !important;
-  border: 1px solid #cbd5e1;
-  border-top: 5px solid #be1e2d;
+  background: var(--card-bg) !important;
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  border-top: 5px solid var(--primary-color);
   border-radius: 1.5rem;
   box-shadow: 0 40px 60px rgba(0, 0, 0, 0.2);
   overflow-x: hidden;
@@ -188,7 +186,7 @@
 }
 
 .sp-suggestion-item {
-  padding: 1rem;
+  padding: 0.85rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -196,13 +194,13 @@
   transition: all 0.2s ease;
   border-radius: 1.2rem;
   margin-bottom: 0.5rem;
-  background: #ffffff;
-  border: 1px solid #f1f5f9;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
 }
 
 .sp-suggestion-item:hover {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: var(--card-bg);
+  border-color: var(--primary-color);
   transform: translateX(8px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
@@ -219,14 +217,14 @@
 }
 
 .sp-sugg-img {
-  width: 70px;
-  height: 70px;
-  min-width: 70px;
+  width: 64px;
+  height: 64px;
+  min-width: 64px;
   object-fit: contain;
-  background: #ffffff;
+  background: #ffffff; /* Always white inside for product logos */
   border-radius: 0.8rem;
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
+  padding: 0.4rem;
+  border: 1px solid var(--border-color);
   box-shadow: 0 2px 4px rgba(0,0,0,0.04);
 }
 
@@ -251,16 +249,16 @@
 }
 
 .sp-sugg-text {
-  font-weight: 900;
-  color: #0f172a;
-  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-size: 1.15rem;
   line-height: 1;
 }
 
 .sp-sugg-desc {
-  font-size: 0.88rem;
-  color: #475569;
-  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--text-dim);
+  font-weight: 500;
   max-width: 500px;
   white-space: nowrap;
   overflow: hidden;
@@ -412,8 +410,8 @@
 }
 
 .sp-card {
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
   border-radius: 1.5rem;
   padding: 1.25rem;
   display: flex;
@@ -425,8 +423,8 @@
 
 .sp-card:hover {
   transform: translateY(-8px);
-  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15);
-  border-color: #be1e2d;
+  box-shadow: var(--shadow);
+  border-color: var(--primary-color);
 }
 
 .sp-card.added {
@@ -689,6 +687,10 @@
 .dark-theme .sp-root {
   border-color: rgba(51, 65, 85, 0.62);
   background: linear-gradient(156deg, rgba(15, 23, 42, 0.7) 0%, rgba(10, 17, 31, 0.56) 100%);
+}
+
+.dark-theme .sp-hero {
+  background: rgba(15, 23, 42, 0.45);
 }
 
 .dark-theme .sp-brand-tabs,

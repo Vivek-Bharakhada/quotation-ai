@@ -98,7 +98,7 @@ PRODUCT_DETAIL_HINTS = (
     "WALL",
     "WASH",
 )
-LEADING_PRODUCT_CODE_RE = re.compile(r'^((?:[A-Z]{1,3}-\d[\d-]*|\d[\d-]*))(?:\s+([A-Z0-9+]{1,5}))?', re.IGNORECASE)
+LEADING_PRODUCT_CODE_RE = re.compile(r'^((?:[A-Z]{1,3}-\d[A-Z0-9\+\-\ ]*|\d[A-Z0-9\+\-\ ]*))(?:\s+([A-Z0-9+]{1,5}))?', re.IGNORECASE)
 FINISH_CODE_LABELS = {
     "B": "Glossy Black",
     "BC": "Beige Caramel",
@@ -200,6 +200,19 @@ AQUANT_PAGE_CODE_OVERRIDES = {
         "90080 BS CH": {"generic_name": "Shower Channel Base (304 SS)", "price": "6100", "image_slot": "BS CH"},
         "120080 BS CH": {"generic_name": "Shower Channel Base (304 SS)", "price": "11000", "image_slot": "BS CH"},
     },
+    8: {
+        "1961 + 1963 AB": {"generic_name": "Semi-Counter Basin + SS Stand Set (Antique Bronze)", "price": "76000", "image_slot": "1961SET_AB"},
+        "1962 + 1963 AB": {"generic_name": "Three-Hole Semi-Counter Basin + SS Stand Set (Antique Bronze)", "price": "77000", "image_slot": "1962SET_AB"},
+        "1961 + 1963 G": {"generic_name": "Semi-Counter Basin + SS Stand Set (Gold)", "price": "76000", "image_slot": "1961SET_G"},
+        "1962 + 1963 G": {"generic_name": "Three-Hole Semi-Counter Basin + SS Stand Set (Gold)", "price": "77000", "image_slot": "1962SET_G"},
+        "1961": {"generic_name": "Semi-Counter Basin (700 x 480 mm)", "price": "16500", "image_slot": "1961_BASIN"},
+        "1962": {"generic_name": "Three-Hole Semi-Counter Basin (700 x 480 mm)", "price": "17500", "image_slot": "1962_BASIN"},
+        "1941": {"generic_name": "Three-Hole Semi-Counter Basin (White)", "price": "12500", "image_slot": "1941"},
+        "1942": {"generic_name": "Semi-Counter Basin (585 x 460 mm)", "price": "13500", "image_slot": "1942"},
+        "1963 AB": {"generic_name": "SS (304) Stand (Antique Bronze)", "price": "59500", "image_slot": "1963_SET_AB"},
+        "1963 G": {"generic_name": "SS (304) Stand (Gold)", "price": "59500", "image_slot": "1963_SET_G"},
+        "1953": {"generic_name": "Table Mounted Basin (550 x 365 mm)", "price": "9500", "image_slot": "1953"},
+    },
 }
 
 AQUANT_PAGE_IMAGE_ANCHORS = {
@@ -208,6 +221,19 @@ AQUANT_PAGE_IMAGE_ANCHORS = {
         "TI": (226.0, 103.0),
         "BS": (369.0, 104.0),
         "BS CH": (512.0, 104.0),
+    },
+    8: {
+        "1961SET_AB": (103.0, 110.0),
+        "1961SET_G": (103.0, 303.0),
+        "1961_BASIN": (103.0, 513.0),
+        "1941": (103.0, 692.0),
+        "1962SET_AB": (297.0, 111.0),
+        "1962SET_G": (297.0, 304.0),
+        "1962_BASIN": (297.0, 512.0),
+        "1942": (297.0, 692.0),
+        "1963_SET_AB": (491.0, 107.0),
+        "1963_SET_G": (491.0, 300.0),
+        "1953": (491.0, 712.0),
     },
 }
 
@@ -357,42 +383,62 @@ def _prune_suspicious_page_images(page_products, image_records):
         ]
 
 
-def _score_catalog_image_match(item, image_record, page_half):
+def _score_catalog_image_match(item, image_record, page_width):
     rect = image_record.get("rect")
     if rect is None or not image_record.get("path"):
         return None
 
     p_cx = item.get("cx") or 0
     p_cy = item.get("cy") or 0
-    p_col = 0 if p_cx < page_half else 1
+    
+    # Precise Column Detection (Aquant/Kohler standard layouts)
+    # Apage is 595pt wide usually.
+    col_width = page_width / 3.1 # slightly more than 1/3 to be safe
+    if page_width > 500:
+        p_col = 0 if p_cx < 200 else (1 if p_cx < 395 else 2)
+    else:
+        p_col = 0 if p_cx < (page_width / 2.0) else 1
 
     img_cx = (rect.x0 + rect.x1) / 2
     img_cy = (rect.y0 + rect.y1) / 2
-    i_col = 0 if img_cx < page_half else 1
+    
+    if page_width > 500:
+        i_col = 0 if img_cx < 200 else (1 if img_cx < 395 else 2)
+    else:
+        i_col = 0 if img_cx < (page_width / 2.0) else 1
 
     dx = abs(img_cx - p_cx)
     dy = img_cy - p_cy
-    col_penalty = 0 if p_col == i_col else 400
+    
+    # Strong Column Affinity - Mixing columns is the main source of wrong images
+    col_penalty = 0 if p_col == i_col else 700 
+    
     v_penalty = 0
-    if dy > 50:
-        v_penalty = 300
-    if dy < -450:
-        v_penalty = 200
+    # Heuristic: Catalog images are usually ABOVE the product code row (dy < 0)
+    # or occasionally to the side (dy near 0)
+    if dy > 60: # Image is significantly below text row
+        v_penalty += 300
+    if dy < -450: # Image is way too far above
+        v_penalty += 200
+        
+    # Favor closer vertical alignment if in same column
+    dist_raw = (dx ** 2 + dy ** 2) ** 0.5
+    
+    # Weight X-alignment more for multi-column grids
+    score = ((dx * 1.8) ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
+    
+    if distance_is_good := (score < 800):
+        return score
+    return None
 
-    distance = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
-    if distance >= 750:
-        return None
 
-    return distance
-
-
-def _assign_catalog_images_globally(page_products, available_images, page_half):
+def _assign_catalog_images_globally(page_products, available_images, page_width):
     candidate_pairs = []
     for product_index, item in enumerate(page_products):
         if item.get("images"):
             continue
         for image_record in available_images:
-            score = _score_catalog_image_match(item, image_record, page_half)
+            score = _score_catalog_image_match(item, image_record, page_width)
             if score is None:
                 continue
             rect = image_record["rect"]
@@ -447,7 +493,7 @@ def normalize_label(text):
 
 
 def extract_product_code_parts(text):
-    cleaned = clean_text(text or "")
+    cleaned = clean_text(text or "").replace(" + ", "+").replace(" - ", "-")
     match = LEADING_PRODUCT_CODE_RE.match(cleaned)
     if not match:
         return "", ""
@@ -494,6 +540,13 @@ def split_aquant_segments(text):
         starts_price = bool(re.search(r'\bMRP\b|^`|^₹', token, re.IGNORECASE))
 
         if starts_code:
+            # Fix: Don't split if the current segment ends with '+' or this token starts with '+'
+            # or if either contains a '+' and looks like a combined code.
+            has_plus = '+' in (current or "") or '+' in token
+            if current and (current.strip().endswith('+') or token.strip().startswith('+') or (has_plus and len(token) < 10)):
+                current = f"{current} {token}"
+                continue
+            
             if current:
                 segments.append(current)
             current = token
@@ -910,7 +963,28 @@ def apply_aquant_special_finish_image_rows(page_num, page_products, img_records)
                 item["images"] = [best_img["path"]]
 
 
+def _get_extraction_cache_path(pdf_path):
+    pdf_name = os.path.basename(pdf_path)
+    file_stat = os.stat(pdf_path)
+    key = f"{pdf_name}_{file_stat.st_size}_{int(file_stat.st_mtime)}_{IMAGE_GENERATION_VERSION}"
+    cache_name = hashlib.md5(key.encode("utf-8")).hexdigest()[:12] + ".cache.json"
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, cache_name)
+
+
 def extract_content(pdf_path, max_pages=None):
+    cache_path = _get_extraction_cache_path(pdf_path)
+    if os.path.exists(cache_path) and not max_pages:
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+                if cached_data:
+                    print(f"--- USING CACHED EXTRACTION FOR {os.path.basename(pdf_path)} ({len(cached_data)} items) ---")
+                    return cached_data
+        except Exception as e:
+            print(f"Cache read error for {pdf_path}: {e}")
+
     doc = fitz.open(pdf_path)
     content_list = []
 
@@ -1639,6 +1713,10 @@ def extract_content(pdf_path, max_pages=None):
         # Helper to check if block is a product code
         def is_product_code(text):
             t = text.strip()
+            # Handle combined codes like 1961+1963 (sometimes split into 1961+19 and 63B)
+            if '+' in t and any(c.isdigit() for c in t):
+                return True
+                
             words = t.split()
             if not words: return False
             w = words[0]
@@ -1776,10 +1854,13 @@ def extract_content(pdf_path, max_pages=None):
                     current_sp["text"] += "\n" + l
                     
                     # Update price if MRP mentions found in secondary lines
+                    # Only update if the price is different and not zero
                     lp_comp = re.sub(r'[\s/\-]+', '', l)
                     im = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]{3,})', lp_comp, re.IGNORECASE)
                     if im:
-                        current_sp["price"] = im.group(1).replace(",", "")
+                        new_p = im.group(1).replace(",", "")
+                        if new_p and new_p != current_sp["price"]:
+                            current_sp["price"] = new_p
             
             if current_sp["name"]:
                 sub_prods.append(current_sp)
@@ -1928,8 +2009,7 @@ def extract_content(pdf_path, max_pages=None):
 
         # Image Matching
         available_images = list(img_records)
-        page_half = page.rect.width / 2  # column boundary
-        _assign_catalog_images_globally(page_products, available_images, page_half)
+        _assign_catalog_images_globally(page_products, available_images, page.rect.width)
 
 
         detail_candidates = [
@@ -2180,34 +2260,23 @@ def extract_content(pdf_path, max_pages=None):
                 continue
 
             img_rect = ir["rect"]
-            img_cx = (img_rect.x0 + img_rect.x1) / 2
-            img_cy = (img_rect.y0 + img_rect.y1) / 2
-            i_col = 0 if img_cx < page_half else 1
+            i_col = 0 if (img_rect.x0 + img_rect.x1)/2 < 200 else (1 if (img_rect.x0 + img_rect.x1)/2 < 395 else 2)
+            
             best_family_key = None
             best_score = float("inf")
 
             for family_key, bucket in family_buckets.items():
                 local_best = float("inf")
                 for _, item in bucket:
-                    p_cx = item.get("cx") or 0
-                    p_cy = item.get("cy") or 0
-                    p_col = 0 if p_cx < page_half else 1
-                    col_penalty = 0 if p_col == i_col else 400
-                    dx = abs(img_cx - p_cx)
-                    dy = img_cy - p_cy
-                    v_penalty = 0
-                    if dy > 70: v_penalty = 220
-                    if dy < -480: v_penalty = 180
-
-                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
-                    if score < local_best:
+                    score = _score_catalog_image_match(item, ir, page.rect.width)
+                    if score is not None and score < local_best:
                         local_best = score
 
                 if local_best < best_score:
                     best_score = local_best
                     best_family_key = family_key
 
-            if best_family_key and best_score < 750:
+            if best_family_key and best_score < 850:
 
 
                 family_image_map[best_family_key].append(img_path)
@@ -2228,21 +2297,10 @@ def extract_content(pdf_path, max_pages=None):
                     ir = image_records_by_path.get(img_path)
                     if not ir:
                         continue
-                    img_rect = ir["rect"]
-                    img_cx = (img_rect.x0 + img_rect.x1) / 2
-                    img_cy = (img_rect.y0 + img_rect.y1) / 2
-                    p_cx = item.get("cx") or 0
-                    p_cy = item.get("cy") or 0
-                    p_col = 0 if p_cx < page_half else 1
-                    i_col = 0 if img_cx < page_half else 1
-                    col_penalty = 0 if p_col == i_col else 400
-                    dx = abs(img_cx - p_cx)
-                    dy = img_cy - p_cy
-                    v_penalty = 0
-                    if dy > 70: v_penalty = 220
-                    if dy < -480: v_penalty = 180
-                    score = (dx ** 2 + dy ** 2) ** 0.5 + v_penalty + col_penalty
-                    if score < best_score and score < 750:
+                    score = _score_catalog_image_match(item, ir, page.rect.width)
+                    if score is not None and score < best_score:
+                        best_score = score
+                        best_path = img_path
 
 
 
@@ -2274,7 +2332,92 @@ def extract_content(pdf_path, max_pages=None):
             if "_price_source" in p: del p["_price_source"]
             content_list.append(p)
 
-    return content_list
+    # ── POST-PROCESSING: Inherit missing images & prices from siblings ──
+    from collections import defaultdict as _dd
+
+    # Pass 1: Group by exact base code
+    _base_groups = _dd(list)
+    for item in content_list:
+        code = item.get("search_code", "") or item.get("name", "")
+        parts = code.split()
+        base = parts[0] if parts else code
+        # For combined codes like "1962 + 1963 G", use "1962 + 1963"
+        if "+" in code:
+            plus_idx = code.index("+")
+            after_plus = code[plus_idx+1:].strip()
+            after_parts = after_plus.split()
+            if after_parts and after_parts[0].isdigit():
+                base = code[:plus_idx].strip() + " + " + after_parts[0]
+            else:
+                base = code
+        _base_groups[base].append(item)
+
+    _inherit_count_img = 0
+    _inherit_count_price = 0
+
+    for base, group in _base_groups.items():
+        donor_img = next((it for it in group if it.get("images")), None)
+        donor_price = next((it for it in group if str(it.get("price", "0")) not in ("", "0")), None)
+
+        for it in group:
+            if not it.get("images") and donor_img:
+                it["images"] = list(donor_img["images"])
+                _inherit_count_img += 1
+            if str(it.get("price", "0")) in ("", "0") and donor_price:
+                it["price"] = donor_price["price"]
+                _inherit_count_price += 1
+
+    # Pass 2: For still-missing items, try dash-prefix siblings
+    # e.g. "1424-200" can inherit from "1424", "1434-750" from "1434-600"
+    _still_missing_img = [it for it in content_list if not it.get("images")]
+    _still_missing_price = [it for it in content_list if str(it.get("price", "0")) in ("", "0")]
+
+    # Build a lookup: numeric prefix -> items with image/price
+    _prefix_img_donors = _dd(list)
+    _prefix_price_donors = _dd(list)
+    for item in content_list:
+        code = item.get("search_code", "") or ""
+        # Extract numeric prefix (e.g. "1424" from "1424-200 BRG")
+        m = re.match(r'^(\d{3,})', code)
+        if m:
+            prefix = m.group(1)
+            if item.get("images"):
+                _prefix_img_donors[prefix].append(item)
+            if str(item.get("price", "0")) not in ("", "0"):
+                _prefix_price_donors[prefix].append(item)
+
+    for it in _still_missing_img:
+        code = it.get("search_code", "") or ""
+        m = re.match(r'^(\d{3,})', code)
+        if not m:
+            continue
+        prefix = m.group(1)
+        donors = _prefix_img_donors.get(prefix, [])
+        if donors:
+            it["images"] = list(donors[0]["images"])
+            _inherit_count_img += 1
+
+    for it in _still_missing_price:
+        code = it.get("search_code", "") or ""
+        m = re.match(r'^(\d{3,})', code)
+        if not m:
+            continue
+        prefix = m.group(1)
+        donors = _prefix_price_donors.get(prefix, [])
+        if donors:
+            it["price"] = donors[0]["price"]
+            _inherit_count_price += 1
+
+    if _inherit_count_img or _inherit_count_price:
+        print(f"   [INHERIT] Fixed {_inherit_count_img} missing images, {_inherit_count_price} missing prices from siblings")
+
+    # Save to cache if complete extraction
+    if content_list and not max_pages:
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(content_list, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"Cache write error for {pdf_path}: {e}")
 
     return content_list
 
