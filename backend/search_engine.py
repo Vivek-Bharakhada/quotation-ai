@@ -5,10 +5,22 @@ import json
 import threading
 
 import cloud_storage
+from app_paths import resolve_data_dir
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import sys
+is_frozen = getattr(sys, 'frozen', False)
+EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.path.dirname(os.path.abspath(__file__))
+_MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
 
-# Lazy model loading - loads in background to avoid blocking app startup
+BUNDLED_DIR = EXE_DIR
+DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
+
+# Priority path for search index
+INDEX_FILE_PERSISTENT = os.path.join(DATA_DIR, "search_index_v2.json")
+INDEX_FILE_BUNDLED = os.path.join(BUNDLED_DIR, "search_index_v2.json")
+INDEX_FILE = INDEX_FILE_PERSISTENT
+
+# Lazy model loading - loads in background only when needed
 AI_AVAILABLE = False
 model = None
 _model_lock = threading.Lock()
@@ -25,7 +37,9 @@ def _load_model_background():
             AI_AVAILABLE = True
         print("Semantic Model Loaded OK.")
     except Exception as e:
-        print(f"Warning: Semantic model not available: {e}")
+        print(f"Warning: Semantic model failed to load (possibly OOM): {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         _model_loading = False
 
@@ -33,19 +47,13 @@ def ensure_model_loaded():
     """Trigger model loading if not already started."""
     global _model_loading
     
-    # Memory workaround: The 512MB RAM limit is too small for SentenceTransformer. 
-    # Detect Railway or Render to skip heavy AI model loading.
-    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT_NAME") or os.environ.get("RAILWAY_STATIC_URL"):
-        print("--- RAILWAY/RENDER DETECTED: SKIPPING HEAVY AI MODEL TO PREVENT OOM CRASH ---")
-        return
-
     if model is None and not _model_loading:
         _model_loading = True
+        print("Lazy Loading triggered for Semantic Model...")
         threading.Thread(target=_load_model_background, daemon=True).start()
 
-# Start loading model in background immediately on import (non-blocking)
-print("Queuing Semantic Model for background load...")
-ensure_model_loaded()
+# REMOVED: immediate load on import
+# ensure_model_loaded()
 
 # Try loading FAISS
 FAISS_AVAILABLE = False
@@ -66,12 +74,13 @@ vector_index  = None # FAISS index
 search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
 item_code_meta_cache = {}
+_index_cache_signature = None
 
 
-INDEX_FILE = os.path.join(BASE_DIR, "search_index_v2.json")
+# INDEX_FILE is now dynamically determined in load_index
 SEARCH_INDEX_OBJECT_PATH = os.getenv("SUPABASE_SEARCH_INDEX_PATH", "search/search_index_v2.json")
 
-STATIC_IMAGES_DIR = os.path.join(BASE_DIR, "static", "images")
+STATIC_IMAGES_DIR = os.path.join(BUNDLED_DIR, "static", "images")
 
 # Minimum file size (bytes) for a valid product image.
 # Images below this are icons, colour swatches, or small decorative elements from the PDF.
@@ -95,6 +104,7 @@ _KNOWN_FINISH_LABELS = {
     "CB": "Chrome Black",
     "CGY": "Chrome Grey",
     "CH": "Chrome",
+    "CM": "Carrara Marble",
     "CNG": "Champagne Gold",
     "CP": "Chrome Plated",
     "CW": "Chrome White",
@@ -107,11 +117,14 @@ _KNOWN_FINISH_LABELS = {
     "MB": "Matt Black",
     "MG": "Matt Grey",
     "MI": "Matt Ivory",
+    "LM": "Lavender Marble (Chevron Amethyst)",
     "MW": "Matt White/White",
     "OG": "Olive Green",
     "ORB": "Oil Rubbed Bronze",
     "RB": "Royal Blue",
     "RG": "Rose Gold",
+    "BM": "Marquina Marble",
+    "PP": "Pink Paradise (Pink Onyx)",
     "RGB": "Rose Gold/Matt Black",
     "RGD": "Rose Gold",
     "RGW": "Rose Gold/Matt White",
@@ -127,6 +140,19 @@ _KNOWN_FINISH_LABELS = {
     "WN": "Walnut",
     "WRG": "White Rose Gold",
     "WTE": "Matt White",
+    # Kohler Finishes
+    "0": "White",
+    "7": "Black Black",
+    "AF": "Vibrant French Gold",
+    "BN": "Vibrant Brushed Nickel",
+    "BV": "Vibrant Brushed Bronze",
+    "BGD": "Vibrant Moderne Brushed Gold",
+    "2MB": "Vibrant Brushed Moderne Brass",
+    "TT": "Vibrant Titanium",
+    "VS": "Vibrant Stainless",
+    "BL": "Matte Black",
+    "GP1": "Gold",
+    "GP2": "Brushed Gold",
 }
 _KNOWN_FINISH_CODES = tuple(sorted(_KNOWN_FINISH_LABELS.keys(), key=len, reverse=True))
 
@@ -178,6 +204,11 @@ def _split_attached_finish_token(code: str):
     if not normalized:
         return "", ""
 
+    # Plain numeric model codes like "4000" or "4010" should stay intact.
+    # Treating the trailing 0/7 as a finish token breaks exact code search.
+    if normalized.isdigit():
+        return normalized, ""
+
     combo_match = re.match(
         r'^((?:[A-Z]{1,4}-\d[A-Z0-9-]*|\d[\d-]*))([A-Z]{1,4}(?:\+[A-Z]{1,4})+)$',
         normalized,
@@ -210,6 +241,20 @@ def _format_finish_label(variant_code: str) -> str:
         return ""
     return " + ".join(_KNOWN_FINISH_LABELS.get(part, part) for part in normalized.split("+") if part)
 
+def _clean_display_text(text: str) -> str:
+    """Normalize common mojibake/bullet artifacts for UI display."""
+    if not text:
+        return ""
+    s = str(text)
+    # Common UTF-8 mojibake sequences from PDF bullets/dashes.
+    for bad in ("â€¢", "â€“", "â€”", "â€", "â–=", "â–"):
+        s = s.replace(bad, "•")
+    # Normalize bullet-like glyphs to a simple dash for cleaner UI.
+    for bullet in ("•", "●", "▪", "◦", "◾", "■"):
+        s = s.replace(bullet, "-")
+    # Collapse extra spaces introduced by replacements.
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
 
 def _parse_code_metadata(raw_text: str):
     text = str(raw_text or "").strip()
@@ -269,6 +314,34 @@ def _get_item_code_metadata(item):
     cached = item_code_meta_cache.get(cache_key)
     if isinstance(cached, dict) and cached.get("full_code") is not None:
         return cached
+
+    # Prefer any code metadata already present on the item. This matters for
+    # catalogs where the stored index has been normalized offline (for example
+    # Aquant families like 1330 CI/IR/MT/GS/AO) and avoids re-parsing raw text
+    # back into an older, less accurate split.
+    stored_base = str(item.get("base_code", "")).strip().upper()
+    stored_variant = _normalize_variant_token(item.get("variant_code", ""))
+    stored_search = str(item.get("search_code", "")).strip().upper()
+    if stored_base:
+        full_code = stored_search or stored_base
+        if not full_code.startswith(stored_base):
+            full_code = stored_base
+            if stored_variant:
+                full_code = f"{stored_base} {stored_variant}".strip()
+        elif not stored_variant and full_code != stored_base:
+            stored_variant = _normalize_variant_token(full_code[len(stored_base):].strip())
+
+        meta = {
+            "base_code": stored_base,
+            "variant_code": stored_variant,
+            "full_code": full_code,
+            "base_compact": _compact_alnum(stored_base),
+            "variant_compact": _compact_alnum(stored_variant),
+            "full_compact": _compact_alnum(full_code),
+            "finish_label": item.get("finish_label") or _format_finish_label(stored_variant),
+        }
+        item_code_meta_cache[cache_key] = meta
+        return meta
 
     for raw in (
         item.get("code", ""),
@@ -346,27 +419,38 @@ def save_index():
         except Exception as e:
             print(f"Warning: failed to sync index to cloud storage: {e}")
 
-def load_index():
-    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache
-    if not os.path.exists(INDEX_FILE) and cloud_storage.is_enabled():
+def load_index(force: bool = False):
+    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache, _index_cache_signature
+    
+    # Decide which index file to use
+    index_file = INDEX_FILE_PERSISTENT
+    if not os.path.exists(index_file):
+        index_file = INDEX_FILE_BUNDLED
+        
+    if not os.path.exists(index_file) and cloud_storage.is_enabled():
         try:
             restored = cloud_storage.download_to_path(
                 cloud_storage.SYSTEM_BUCKET,
                 SEARCH_INDEX_OBJECT_PATH,
-                INDEX_FILE,
+                index_file,
             )
             if restored:
                 print("Restored search index from cloud storage.")
         except Exception as e:
             print(f"Warning: failed to restore index from cloud storage: {e}")
 
-    if os.path.exists(INDEX_FILE):
+    if os.path.exists(index_file):
         try:
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+            signature = (index_file, os.path.getmtime(index_file), os.path.getsize(index_file))
+            if not force and stored_items and _index_cache_signature == signature:
+                return True
+
+            with open(index_file, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
                 stored_items = data.get("stored_items", [])
                 keyword_index = data.get("keyword_index", {})
-            print(f"Index loaded: {len(stored_items)} items")
+            print(f"Index loaded: {len(stored_items)} items from {index_file}")
+            _index_cache_signature = signature
 
             item_code_meta_cache = {}
             _enrich_items_for_search(stored_items)
@@ -521,6 +605,14 @@ def _exact_name_variants(item):
             variants.append(cleaned)
 
     parts = [part.strip() for part in base_line.split(" - ") if part.strip()]
+    
+    # NEW: Handle Kohler style "Title (Code)" or "Title Code"
+    if not parts or len(parts) < 2:
+        # Try finding a bracketed code or a trailing K- code
+        m = re.search(r'^(.*?)\s*[\(\[]?\s*(K-\d[A-Z0-9-]*)\s*[\)\]]?$', base_line, re.IGNORECASE)
+        if m:
+            parts = [m.group(1).strip(), m.group(2).strip()]
+            
     if parts:
         head = parts[0]
         tail_parts = parts[1:] if (_extract_model_tokens(head) or bool(re.search(r'\d', head))) else parts
@@ -675,8 +767,7 @@ def search(query: str, smart: bool = False, brand: str = None):
     if not query:
         return []
         
-    if not stored_items:
-        load_index()
+    load_index()
     if not stored_items:
         return []
 
@@ -833,6 +924,18 @@ def search(query: str, smart: bool = False, brand: str = None):
             if has_exact_code:
                 line_exact = any(_compact_alnum(line) == query_code for line in header_lines[:4])
                 best = max(best, 3000.0 + (80.0 if line_exact else 0.0) + quality_bonus)
+            
+            # Smart Partial Logic: If query matches start of a token (e.g. "K-277" matches "K-27792IN")
+            # give it a mid-range score so it appears above generic fuzzy hits.
+            if best < 2500 and len(query_code) >= 4:
+                prefix_match = any(tok_compact.startswith(query_code) for tok_compact in token_compacts)
+                if prefix_match:
+                    best = max(best, 2400.0 + quality_bonus)
+            elif best < 2000 and len(query_code) >= 3:
+                # Shorter prefix match also gets a boost over totally unrelated items
+                prefix_match = any(tok_compact.startswith(query_code) for tok_compact in token_compacts)
+                if prefix_match:
+                    best = max(best, 1900.0 + quality_bonus)
 
             if best == 0 and query_is_numeric:
                 # Numeric-only search: allow exact numeric segment only (not broad substring).
@@ -867,21 +970,21 @@ def search(query: str, smart: bool = False, brand: str = None):
                     seen_names.add(cand_name)
                     unique_candidates.append(cand)
 
-            # Return at most 2 distinct variants (like 2 distinct colors), but normally just 1.
-            max_exact_results = 1 if query_variant_compact else 2
+            # INCREASED: Show more variants (e.g. all 12+ finishes for a code)
+            max_exact_results = 15
             results = unique_candidates[:max_exact_results]
             
             search_cache[cache_key] = results
             return results
         
         # PERMANENT: If the algorithm proved it's a code search ("7512 OG", "1186 RG") and we didn't
-        # hit perfectly exact above, we fall through to fuzzy but we MUST limit it to 1 result, 
-        # so it doesn't give you random basins just because they matched "OG".
-        fuzzy_max = 1
+        # hit perfectly exact above, we fall through to fuzzy but we MUST limit it to a reasonable set, 
+        # so it doesn't give you random irrelevant stuff but still shows variants.
+        fuzzy_max = 12
     else:
         # For non-code queries (like "wash basin", "olive green"), allow more results 
         # so user can see options, but cap to a reasonable number.
-        fuzzy_max = 5
+        fuzzy_max = 30
 
     scores = {}
     
@@ -1048,8 +1151,7 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
     if not query:
         return []
 
-    if not stored_items:
-        load_index()
+    load_index()
     if not stored_items:
         return []
 
@@ -1098,33 +1200,126 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
     return unique_res
 
 
-def get_suggestions(query: str, limit: int = 10, brand: str = None):
+def _items_to_suggestion_payload(items, limit: int = 50):
+    final_results = []
+    seen = set()
+    for item in items:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+
+        item_code_meta = _get_item_code_metadata(item)
+        parts = name.split(" - ", 1)
+        code = parts[0].strip() or item_code_meta.get("full_code") or name
+        description = parts[1].strip() if len(parts) > 1 else ""
+        full_name = name
+        dedupe_key = f"{str(item.get('brand') or '').lower()}|{full_name.lower()}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        final_results.append({
+            "text": code,
+            "description": description,
+            "full_name": full_name,
+            "brand": item.get("brand", "Aquant"),
+            "image": item.get("images", [None])[0] if item.get("images") else None,
+            "raw_item": item,
+        })
+        if len(final_results) >= limit:
+            break
+    return final_results
+
+
+def _merge_suggestion_payloads(*payload_groups, limit: int = 50):
+    merged = []
+    seen = set()
+    for group in payload_groups:
+        for item in group or []:
+            key = f"{str(item.get('brand') or '').lower()}|{str(item.get('full_name') or item.get('text') or '').lower()}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def get_suggestions(query: str, limit: int = 50, brand: str = None):
     if not query or len(query.strip()) < 2:
         return []
 
-    if not stored_items:
-        load_index()
+    # Start model loading in background if it's the first search
+    ensure_model_loaded()
+
+    load_index()
     if not stored_items:
         return []
 
-    q = query.strip().lower()
-    q_words = [w for w in re.split(r'[\s\-\/]+', q) if len(w) >= 2]
-    if not q_words:
-        return []
+    # Seed suggestions from the richer search ranking first so exact and near-exact
+    # product hits are available before we fall back to lightweight prefix scans.
+    seeded_items = search(query, smart=False, brand=brand)
+    seeded_payload = _items_to_suggestion_payload(seeded_items, limit=limit)
     query_code_meta = _parse_code_metadata(query)
 
+    query_is_code = _is_code_or_model_query(query)
+    exact_family_payload = []
+    if query_is_code and (query_code_meta.get("full_compact") or query_code_meta.get("base_compact")):
+        brand_lower = (brand or "").strip().lower()
+        is_all_brand = (not brand_lower) or (brand_lower == "all")
+        exact_family_items = []
+        for item in stored_items:
+            if not is_all_brand and _item_brand(item) != brand_lower:
+                continue
+            item_code_meta = _get_item_code_metadata(item)
+            if query_code_meta.get("full_compact") and item_code_meta.get("full_compact") == query_code_meta["full_compact"]:
+                exact_family_items.append(item)
+                continue
+            if (
+                query_code_meta.get("base_compact")
+                and item_code_meta.get("base_compact") == query_code_meta["base_compact"]
+                and (
+                    not query_code_meta.get("variant_compact")
+                    or item_code_meta.get("variant_compact") == query_code_meta["variant_compact"]
+                )
+            ):
+                exact_family_items.append(item)
+        exact_family_payload = _items_to_suggestion_payload(exact_family_items, limit=limit)
+
+    if query_is_code:
+        exact_first = _merge_suggestion_payloads(exact_family_payload, seeded_payload, limit=limit)
+        if exact_first:
+            return exact_first
+
+    q = query.strip().lower()
+    q_compact = _compact_alnum(q)
+    # Split query into words but preserve codes like K-1234
+    q_words = [w for w in re.split(r'\s+', q) if len(w) >= 2]
+    # Add compacted components (k282, 1234) for better lookups
+    tokens_to_check = set(q_words) | {q_compact}
+    if len(q_compact) > 3:
+        tokens_to_check.add(q_compact[:4])
+    
     # Fast retrieval using keyword index
     potential_indices = set()
-    for w in q_words:
-        # Check for prefix matches in our keyword index as well
+    for w in tokens_to_check:
+        if not w or len(w) < 2: continue
+        # Normalize search token (remove dash for code prefix checks)
+        wn = _normalize(w, strip_in=True)
+        # Check for prefix matches in our keyword index
         for key in keyword_index:
-            if key.startswith(w):
+            if key.startswith(wn) or (len(wn) >= 3 and wn in key):
                 potential_indices.update(keyword_index[key])
-            if len(potential_indices) > 500: break
-        if len(potential_indices) > 500: break
+            if len(potential_indices) > 600: break
+        if len(potential_indices) > 600: break
 
     suggestions = []
     seen = set()
+    for seeded in seeded_payload:
+        seen.add(
+            f"{str(seeded.get('brand') or '').lower()}|{str(seeded.get('full_name') or seeded.get('text') or '').lower()}"
+        )
 
     brand_lower = (brand or "").strip().lower()
     is_all_brand = (not brand_lower) or (brand_lower == "all")
@@ -1168,17 +1363,23 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
         if q_compact and len(q_compact) >= 3 and name_compact.startswith(q_compact):
             score += 250
 
+        if item.get("source") == "Manual Entry":
+            score += 2000 # Massive boost
+            
+        if item.get("brand") in {"Aquant", "Kohler"}:
+            score += 1000 # Extreme boost for core brands
+            
         score += _item_quality_bonus(item)
         
         # Use item name for display to preserve prefixes like "450-" that code parsing might separate
         name_parts = name.split(" - ", 1)
-        display_text = name_parts[0].strip()
+        display_text = _clean_display_text(name_parts[0].strip())
         if not display_text:
-            display_text = item_code_meta.get("full_code") or name.split(" - ")[0].strip()
-        full_display = name.strip()
+            display_text = _clean_display_text(item_code_meta.get("full_code") or name.split(" - ")[0].strip())
+        full_display = _clean_display_text(name.strip())
         if not display_text: continue
         
-        key = f"{str(item.get('brand') or '').lower()}|{display_text.lower()}"
+        key = f"{str(item.get('brand') or '').lower()}|{full_display.lower()}"
         entry = {
             "score": score,
             "code": display_text,
@@ -1192,29 +1393,32 @@ def get_suggestions(query: str, limit: int = 10, brand: str = None):
             seen.add(key)
         else:
             for i, existing in enumerate(suggestions):
-                existing_key = f"{str(existing.get('brand') or '').lower()}|{str(existing.get('code') or '').lower()}"
+                existing_key = f"{str(existing.get('brand') or '').lower()}|{str(existing.get('full_name') or '').lower()}"
                 if existing_key == key and score > existing.get("score", 0):
                     suggestions[i] = entry
                     break
         
-        if len(suggestions) > 50: break
+        if len(suggestions) > max(80, limit * 3):
+            break
 
     # Sort by score descending and then by full text length
     suggestions.sort(key=lambda x: (-x["score"], len(x["full_name"])))
     
-    final_results = []
-    for s in suggestions[:limit]:
+    final_results = _merge_suggestion_payloads(seeded_payload, limit=limit)
+    for s in suggestions:
+        if len(final_results) >= limit:
+            break
         full_name = s["full_name"]
         parts = full_name.split(" - ", 1)
-        code = parts[0].strip()
-        name_desc = parts[1].strip() if len(parts) > 1 else ""
-        
+        name_desc = _clean_display_text(parts[1].strip()) if len(parts) > 1 else ""
+
         final_results.append({
-            "text": s["code"],
+            "text": _clean_display_text(s["code"]),
             "description": name_desc,
+            "full_name": _clean_display_text(full_name),
             "brand": s["brand"],
             "image": s["image_list"][0] if s["image_list"] else None,
             "raw_item": s["item"]
         })
-        
+
     return final_results

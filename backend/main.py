@@ -18,32 +18,78 @@ import search_engine
 import cloud_storage
 from email_service import send_email_with_attachment
 from quotation import generate_quote
+from app_paths import resolve_data_dir
 print("Done with imports!")
 
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-STATIC_IMAGES_DIR = os.path.join(STATIC_DIR, "images")
-STATIC_QUOTES_DIR = os.path.join(STATIC_DIR, "quotes")
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-QUOTES_HISTORY_DIR = os.path.join(BASE_DIR, "quotes_history")
-QUOTATION_PDF_PATH = os.path.join(BASE_DIR, "quotation.pdf")
+import sys
+is_frozen = getattr(sys, 'frozen', False)
+# For bundled sidecar, we look for assets next to the .exe (sys.executable)
+# For dev, we look next to the script (__file__)
+EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.path.dirname(os.path.abspath(__file__))
+_MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
 
-# Mount static folder for images
-os.makedirs(STATIC_IMAGES_DIR, exist_ok=True)
+# BUNDLED_DIR is for read-only assets like the initial index
+BUNDLED_DIR = EXE_DIR
+BASE_DIR = BUNDLED_DIR
+DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
+
+STATIC_DIR = os.path.join(BUNDLED_DIR, "static")
+STATIC_IMAGES_DIR = os.path.join(DATA_DIR, "static", "images")
+# BUNDLED_IMAGES_DIR used for catalog products
+BUNDLED_IMAGES_DIR = os.path.join(STATIC_DIR, "images")
+REPO_IMAGES_DIR = os.path.join(EXE_DIR, "static", "images")
+
+STATIC_QUOTES_DIR = os.path.join(DATA_DIR, "static", "quotes")
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+QUOTES_HISTORY_DIR = os.path.join(DATA_DIR, "quotes_history")
+QUOTATION_PDF_PATH = os.path.join(DATA_DIR, "quotation.pdf")
+
+# Ensure writable dirs exist
+for d in [STATIC_IMAGES_DIR, STATIC_QUOTES_DIR, UPLOAD_DIR, QUOTES_HISTORY_DIR]:
+    os.makedirs(d, exist_ok=True)
+
+# Helper for resolving image paths (prioritize writable uploads, fallback to bundled)
+@app.get("/static/images/{filename:path}")
+def serve_image(filename: str):
+    # 1. Check in Data Dir (new uploads)
+    p1 = os.path.join(STATIC_IMAGES_DIR, filename)
+    if os.path.exists(p1): return FileResponse(p1)
+    
+    # 2. Check in Bundled Dir (catalog items)
+    p2 = os.path.join(BUNDLED_IMAGES_DIR, filename)
+    if os.path.exists(p2): return FileResponse(p2)
+    
+    # 3. Check repo source images when running from the workspace
+    p3 = os.path.join(REPO_IMAGES_DIR, filename)
+    if os.path.exists(p3): return FileResponse(p3)
+
+    # 4. Check Manual uploads folder
+    p3 = os.path.join(STATIC_IMAGES_DIR, "manual", filename)
+    if os.path.exists(p3): return FileResponse(p3)
+
+    raise HTTPException(status_code=404)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# Enhanced CORS for desktop (allows null origin from file://)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], # In production Electron, origin can be 'null'
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Quote-File-Url", "X-Quote-File-Name", "X-Quote-Number"],
 )
+
+# Optional: Log errors to file for debugging bundled app
+import logging
+log_file = os.path.join(DATA_DIR, "backend_errors.log")
+logging.basicConfig(filename=log_file, level=logging.ERROR, 
+                    format='%(asctime)s %(levelname)s:%(message)s')
 
 import threading
 
@@ -413,17 +459,19 @@ def get_status():
 async def create_quote(data: dict):
     timestamp = int(time.time())
     client_slug = _sanitize_filename(data.get("client_name", "Unknown"), "Unknown")
+    quote_payload = dict(data)
 
     # Auto-generate a readable quotation number: SC-YYYYMMDD-XXXX
     date_str = datetime.now().strftime("%Y%m%d")
     seq = str(timestamp)[-4:]          # last 4 digits of unix timestamp
     quote_number = f"SC-{date_str}-{seq}"
-    data["quote_number"] = quote_number
+    quote_payload["quote_number"] = quote_number
+    quote_payload["output_path"] = QUOTATION_PDF_PATH
 
     filename = f"quote_{timestamp}_{client_slug}.json"
-    _save_quote_record(filename, data)
+    _save_quote_record(filename, quote_payload)
 
-    generate_quote(data)
+    generate_quote(quote_payload)
 
     share_pdf_name = f"quote_{timestamp}_{client_slug}.pdf"
     share_pdf_url = ""
@@ -902,4 +950,16 @@ def browse_collection(brand: str, collection: str = None):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        print("Starting Uvicorn...")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except Exception as e:
+        import traceback
+        error_msg = f"FATAL ERROR during backend startup: {e}\n{traceback.format_exc()}"
+        print(error_msg)
+        try:
+            with open(log_file, "a") as f:
+                f.write(f"\n{datetime.now()} {error_msg}\n")
+        except:
+            pass
+        sys.exit(1)
