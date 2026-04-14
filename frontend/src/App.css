@@ -782,6 +782,11 @@ p {
   user-select: none;
 }
 
+.website-shell .footer {
+  border-top: none;
+  background: transparent;
+}
+
 /* Animations */
 @keyframes spin {
   to {

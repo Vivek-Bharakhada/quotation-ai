@@ -3,6 +3,7 @@ import axios from 'axios';
 import './App.css';
 import Quotation from './pages/quotation';
 import Dashboard from './pages/dashboard';
+import Website from './pages/website';
 
 import BASE, {
   clearApiBaseOverride,
@@ -29,6 +30,19 @@ function getStandaloneMode() {
   );
 }
 
+function getInitialShellMode() {
+  if (typeof window === 'undefined') {
+    return 'website';
+  }
+
+  const path = window.location.pathname.toLowerCase();
+  if (path === '/app' || path.startsWith('/app/')) {
+    return 'app';
+  }
+
+  return getStandaloneMode() ? 'app' : 'website';
+}
+
 function getInitialPage() {
   return 'dashboard';
 }
@@ -43,6 +57,7 @@ function getInitialTheme() {
 }
 
 function App() {
+  const [shellMode, setShellMode] = useState(getInitialShellMode);
   const [currentPage, setCurrentPage] = useState(getInitialPage);
   const [syncing, setSyncing] = useState(false);
   const [cart, setCart] = useState(getInitialCart);
@@ -58,9 +73,43 @@ function App() {
   const pageViewClass = `${currentPage}-view`;
 
   useEffect(() => {
+    const syncShellMode = () => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      const path = window.location.pathname.toLowerCase();
+      if (path === '/app' || path.startsWith('/app/')) {
+        setShellMode('app');
+        return;
+      }
+
+      setShellMode(getStandaloneMode() ? 'app' : 'website');
+    };
+
+    window.addEventListener('popstate', syncShellMode);
+    syncShellMode();
+
+    return () => window.removeEventListener('popstate', syncShellMode);
+  }, []);
+
+  useEffect(() => {
     writeString(APP_STATE_KEYS.page, currentPage);
     setMenuOpen(false);
   }, [currentPage]);
+
+  const navigateToShell = (mode) => {
+    if (typeof window === 'undefined') {
+      setShellMode(mode);
+      return;
+    }
+
+    const nextPath = mode === 'app' ? '/app' : '/';
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setShellMode(mode);
+  };
 
   useEffect(() => {
     writeJson(APP_STATE_KEYS.cart, cart);
@@ -198,6 +247,10 @@ function App() {
         />;
     }
   };
+
+  if (shellMode === 'website') {
+    return <Website onEnterApp={() => navigateToShell('app')} />;
+  }
 
   return (
     <div className={`App ${theme === 'dark' ? 'dark-theme' : ''} ${pageViewClass}`}>
