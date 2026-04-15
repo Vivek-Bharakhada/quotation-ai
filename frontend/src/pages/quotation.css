@@ -146,9 +146,9 @@
 }
 
 .qt-add-row {
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(95, 99, 104, 0.35);
   background: var(--primary-gradient);
-  color: #ffffff;
+  color: var(--primary-color);
   border-radius: 0.84rem;
   padding: 0.72rem 0.96rem;
   font-size: 0.78rem;
@@ -156,7 +156,7 @@
   letter-spacing: 0.04em;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  box-shadow: 0 14px 24px -18px rgba(190, 30, 45, 0.8);
+  box-shadow: 0 14px 24px -18px rgba(95, 99, 104, 0.65);
 }
 
 .qt-add-row:hover {
@@ -167,17 +167,24 @@
   display: flex;
   flex-direction: column;
   gap: 0.82rem;
+  overflow: visible;
 }
 
 .qt-item-card {
+  position: relative;
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--card-bg) 90%, #ffffff 10%);
   border-radius: 1rem;
   padding: 0.86rem;
+  overflow: visible;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.75),
     0 20px 32px -28px rgba(15, 23, 42, 0.65);
   transition: border-color 0.22s ease, transform 0.22s ease, box-shadow 0.24s ease;
+}
+
+.qt-item-card:has(.qt-room-combobox.open) {
+  z-index: 30;
 }
 
 .qt-item-card:hover {
@@ -188,10 +195,11 @@
 
 .qt-item-grid {
   display: grid;
-  grid-template-columns: 72px minmax(180px, 1fr) 120px 100px 60px 80px 80px 80px auto;
+  grid-template-columns: 72px minmax(180px, 1fr) 150px 110px 60px 80px 80px 80px auto;
   gap: 0.7rem;
   align-items: center;
   margin-bottom: 0.72rem;
+  overflow: visible;
 }
 
 .qt-thumb {
@@ -267,6 +275,102 @@
 
 .qt-room-field {
   min-width: 100px;
+  padding-right: 2.5rem;
+}
+
+.qt-room-combobox {
+  position: relative;
+  width: 100%;
+  min-width: 140px;
+}
+
+.qt-room-combobox.open {
+  z-index: 12;
+}
+
+.qt-room-combobox-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.38rem;
+  transform: translateY(-50%);
+  width: 1.72rem;
+  height: 1.72rem;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-bg) 88%, #ffffff 12%);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--text-primary) 75%, var(--primary-color));
+  box-shadow: 0 10px 20px -18px rgba(15, 23, 42, 0.45);
+}
+
+.qt-room-combobox-caret {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid currentColor;
+  transition: transform 0.2s ease;
+}
+
+.qt-room-combobox.open .qt-room-combobox-caret {
+  transform: rotate(180deg);
+}
+
+.qt-room-combobox-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  width: 240px;
+  max-width: min(320px, calc(100vw - 2rem));
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 12%, #dbe3ef);
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow:
+    0 28px 50px -24px rgba(15, 23, 42, 0.3),
+    0 16px 30px -24px rgba(190, 30, 45, 0.28);
+  z-index: 10000;
+}
+
+.qt-room-combobox-menu.open-up {
+  transform-origin: bottom left;
+}
+
+.qt-room-combobox-option {
+  border: none;
+  background: transparent;
+  border-radius: 0.72rem;
+  padding: 0.68rem 0.78rem;
+  text-align: left;
+  font-size: 0.84rem;
+  color: #172033;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.qt-room-combobox-option:hover,
+.qt-room-combobox-option.active {
+  background: color-mix(in srgb, var(--primary-color) 9%, #ffffff);
+  color: color-mix(in srgb, var(--primary-color) 74%, #172033);
+}
+
+.qt-room-combobox-option-create {
+  color: var(--primary-color);
+  font-weight: 700;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-color) 10%, #e2e8f0);
+  margin-bottom: 0.18rem;
+  padding-bottom: 0.76rem;
 }
 
 /* Room Summary Table (Premium Brand Style) */
@@ -547,9 +651,9 @@
 .qt-generate-btn {
   width: 100%;
   margin-top: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(95, 99, 104, 0.35);
   background: var(--primary-gradient);
-  color: #ffffff;
+  color: var(--primary-color);
   border-radius: 0.92rem;
   padding: 0.82rem 0.95rem;
   font-size: 0.84rem;
@@ -561,7 +665,7 @@
 
 .qt-generate-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 30px -20px rgba(190, 30, 45, 0.9);
+  box-shadow: 0 16px 30px -20px rgba(95, 99, 104, 0.75);
 }
 
 .qt-pdf-actions {
@@ -591,7 +695,8 @@
 
 .qt-pdf-links a:last-child {
   background: var(--primary-gradient);
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: rgba(95, 99, 104, 0.35);
+  color: var(--primary-color);
 }
 
 .qt-share-btn,
@@ -1039,7 +1144,7 @@
 
 @media (max-width: 1280px) {
   .qt-item-grid {
-    grid-template-columns: 62px minmax(200px, 1fr) 110px 88px 94px auto;
+    grid-template-columns: 62px minmax(200px, 1fr) 138px 88px 94px auto;
   }
 }
 
@@ -1112,6 +1217,10 @@
   }
 
   .qt-item-grid .qt-field {
+    grid-column: span 2;
+  }
+
+  .qt-item-grid .qt-room-combobox {
     grid-column: span 2;
   }
 

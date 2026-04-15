@@ -5,44 +5,17 @@ title Shreeji Ceramica - Installer Launcher
 color 0B
 
 set "ROOT=%~dp0"
-set "SETUP_EXE="
-if exist "%ROOT%*Setup*.exe" (
-    for %%F in ("%ROOT%*Setup*.exe") do (
-        if not defined SETUP_EXE set "SETUP_EXE=%%~fF"
-    )
-)
 
 echo.
 echo  ===================================================
-echo   Shreeji Ceramica - Installer Launcher
+echo   Shreeji Ceramica - Quotation AI
+echo   Install & Launch
 echo  ===================================================
-echo.
-
-if defined SETUP_EXE (
-    echo  [1/2] Found Windows Setup installer.
-    echo  [2/2] Launching installer...
-    echo.
-    echo  %SETUP_EXE%
-    echo.
-    start /wait "" "%SETUP_EXE%"
-    echo.
-    echo  Setup finished.
-    echo  Launch the app from Desktop or Start Menu.
-    echo  Uninstall: Settings ^> Apps ^> Installed apps ^> Shreeji Ceramica
-    echo.
-    pause
-    endlocal
-    exit /b 0
-)
-
-echo  [INFO] Setup EXE not found in this folder.
-echo  Falling back to portable copy mode.
-echo  Note: this fallback does not create a Windows uninstall entry.
 echo.
 
 if not exist "%ROOT%win-unpacked\Shreeji Ceramica.exe" (
     echo  [ERROR] Software files not found!
-    echo  Keep either the Setup EXE or the "win-unpacked" folder next to this script.
+    echo  Keep the "win-unpacked" folder next to this script.
     echo.
     pause
     endlocal
@@ -62,7 +35,7 @@ echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%SCRIPT%"
 echo oLink.TargetPath = "%INSTALL_DIR%\Shreeji Ceramica.exe" >> "%SCRIPT%"
 echo oLink.WorkingDirectory = "%INSTALL_DIR%" >> "%SCRIPT%"
 echo oLink.IconLocation = "%INSTALL_DIR%\Shreeji Ceramica.exe, 0" >> "%SCRIPT%"
-echo oLink.Description = "Shreeji Ceramica" >> "%SCRIPT%"
+echo oLink.Description = "Shreeji Ceramica Quotation AI" >> "%SCRIPT%"
 echo oLink.Save >> "%SCRIPT%"
 
 echo  [3/4] Creating Start Menu shortcut...
@@ -72,7 +45,7 @@ echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%SCRIPT%"
 echo oLink.TargetPath = "%INSTALL_DIR%\Shreeji Ceramica.exe" >> "%SCRIPT%"
 echo oLink.WorkingDirectory = "%INSTALL_DIR%" >> "%SCRIPT%"
 echo oLink.IconLocation = "%INSTALL_DIR%\Shreeji Ceramica.exe, 0" >> "%SCRIPT%"
-echo oLink.Description = "Shreeji Ceramica" >> "%SCRIPT%"
+echo oLink.Description = "Shreeji Ceramica Quotation AI" >> "%SCRIPT%"
 echo oLink.Save >> "%SCRIPT%"
 
 cscript /nologo "%SCRIPT%"
@@ -83,7 +56,8 @@ start "" "%INSTALL_DIR%\Shreeji Ceramica.exe"
 
 echo.
 echo  ===================================================
-echo   Portable install complete.
+echo   Installation complete!
+echo   Desktop shortcut created.
 echo   Uninstall: delete %INSTALL_DIR%
 echo   Then remove Desktop and Start Menu shortcuts.
 echo  ===================================================

@@ -5,6 +5,12 @@ import './dashboard.css';
 import BASE from '../api';
 import { resolveAssetUrl } from '../utils/url';
 
+const publicAsset = (assetPath) => {
+  const publicBase = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  const normalizedPath = String(assetPath || '').startsWith('/') ? String(assetPath || '') : `/${assetPath}`;
+  return `${publicBase}${normalizedPath}`;
+};
+
 const uniqueIndexTitles = (items) => {
   const seen = new Set();
   return items.filter(({ title }) => {
@@ -108,12 +114,12 @@ const BRAND_META = {
   Kohler: {
     subtitle: 'The Bold Look of Kohler',
     title: 'Price Book 2026',
-    heroImage: '/kohler_cover.jpg',
+    heroImage: publicAsset('/kohler_cover.jpg'),
   },
   Plumber: {
     subtitle: 'Plumber Bathware',
     title: 'Luxury Collection 2026',
-    heroImage: `${BASE}/static/images/plumber_hero_premium.png`,
+    heroImage: resolveAssetUrl('/static/images/Plumber_Bathware_1b795ac4cb_p0_i0.jpg'),
   },
 };
 
@@ -344,66 +350,13 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
             </div>
 
             <div className="db-hero-actions">
-              <button className="db-btn db-btn-light" onClick={() => setCurrentPage('search')}>
-                Open Search
-              </button>
               <button className="db-btn db-btn-light" onClick={() => setCurrentPage('quotation')}>
                 Create Quotation ({cart.length})
-              </button>
-              <button
-                className="db-btn db-btn-primary"
-                onClick={handleRefreshCatalog}
-                disabled={isRefreshing}
-              >
-                {isRefreshing ? 'Refreshing...' : 'Refresh Catalog Data'}
               </button>
             </div>
           </section>
 
           <section className="db-index-layout">
-            <article className="db-index-card">
-              <header className="db-index-head">
-                <h2>{activeBrand} Catalog Directory</h2>
-                <p>Select a section to browse products and pricing.</p>
-              </header>
-
-              <div className="db-index-grid">
-                {activeIndex.map((section, idx) => (
-                  <button
-                    key={`${activeBrand}-${idx}-${section.title}`}
-                    className="db-index-row"
-                    onClick={() => handleCategoryClick(section.title, activeBrand)}
-                  >
-                    <span className="db-index-arrow">-&gt;</span>
-                    <span className="db-index-label">{section.title}</span>
-                  </button>
-                ))}
-              </div>
-            </article>
-
-            <aside className="db-helper-card">
-              <h3>Workflow</h3>
-              <ol>
-                <li>Choose brand and section from the directory.</li>
-                <li>Review products and add required lines to quotation cart.</li>
-                <li>Move to quotation page and generate PDF.</li>
-              </ol>
-
-              <div className="db-helper-stats">
-                <div>
-                  <span>Sections</span>
-                  <strong>{activeIndex.length}</strong>
-                </div>
-                <div>
-                  <span>In Cart</span>
-                  <strong>{cart.length}</strong>
-                </div>
-              </div>
-
-              <button className="db-btn db-btn-primary full" onClick={() => setCurrentPage('quotation')}>
-                Go To Quotation
-              </button>
-            </aside>
           </section>
         </>
       ) : (
@@ -472,9 +425,10 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                       const imageCandidates = (item.images || []).filter(Boolean).map(resolveAssetUrl);
                       const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
                       const hasImage = imageSrc && !failedImages[imageSrc];
+                      const cardKey = item.search_code || item.base_code || item.name || item.text || idx;
 
                       return (
-                        <div key={`${item.name || 'item'}-${idx}`} className="db-product-card">
+                        <div key={cardKey} className="db-product-card">
                           <div className="db-product-image-wrap">
                             {hasImage ? (
                               <img src={imageSrc} alt={item.name || 'Product'} loading="lazy" onError={() => markImageFailed(imageSrc)} />

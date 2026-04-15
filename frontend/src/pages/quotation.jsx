@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import './quotation.css';
 
@@ -9,6 +10,16 @@ import { resolveAssetUrl } from '../utils/url';
 
 const QUOTE_DRAFT_KEY = 'quotation-ai/quote-draft';
 const QUOTE_HISTORY_CACHE_KEY = 'quotation-ai/quote-history-cache';
+const DEFAULT_ROOM_OPTIONS = [
+  'Master Bath',
+  'Common Bath',
+  'Guest Bath',
+  'Powder Room',
+  'Kitchen',
+  'Utility',
+  'Balcony',
+  'Living Room',
+];
 
 const blankClient = {
   client_name: '',
@@ -39,8 +50,8 @@ const mapCartToItems = (cart = []) =>
         quantity: 1,
         discount: 0,
         image: item.image || null,
-        room: item.category || item.room || '',
-        rawText: item.rawText || '',
+        room: '',
+        rawText: item.rawText || item.text || '',
         sku: item.sku || '',
         size: item.size || '',
       }))
@@ -74,6 +85,165 @@ async function notifyQuoteReady(quoteNumber, grandTotal) {
   new Notification(title, { body, icon: '/logo192.png' });
 }
 
+function RoomCombobox({ value, options, placeholder, onValueChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState('down');
+  const [menuStyle, setMenuStyle] = useState(null);
+  const wrapperRef = useRef(null);
+  const inputRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      const clickedInsideField = wrapperRef.current && wrapperRef.current.contains(event.target);
+      const clickedInsideMenu = menuRef.current && menuRef.current.contains(event.target);
+
+      if (!clickedInsideField && !clickedInsideMenu) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const currentValue = value || '';
+  const normalizedValue = currentValue.trim().toLowerCase();
+  const filteredOptions = options.filter((option) =>
+    option.toLowerCase().includes(normalizedValue)
+  );
+  const hasExactMatch = options.some((option) => option.toLowerCase() === normalizedValue);
+  const canUseTypedValue = currentValue.trim() && !hasExactMatch;
+
+  const commitValue = (nextValue) => {
+    onValueChange(nextValue);
+    setIsOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!isOpen || !wrapperRef.current) {
+      return;
+    }
+
+    const updateMenuPosition = () => {
+      if (!wrapperRef.current) {
+        return;
+      }
+
+      const wrapperRect = wrapperRef.current.getBoundingClientRect();
+      const menuHeight = Math.min(menuRef.current?.scrollHeight || 220, 220);
+      const spaceBelow = window.innerHeight - wrapperRect.bottom;
+      const spaceAbove = wrapperRect.top;
+      const nextPlacement = spaceBelow < menuHeight + 24 && spaceAbove > spaceBelow ? 'up' : 'down';
+      const viewportPadding = 16;
+      const nextWidth = Math.min(
+        Math.max(wrapperRect.width, 220),
+        window.innerWidth - viewportPadding * 2
+      );
+      const nextLeft = Math.min(
+        Math.max(wrapperRect.left, viewportPadding),
+        window.innerWidth - viewportPadding - nextWidth
+      );
+      const nextTop = nextPlacement === 'up'
+        ? Math.max(viewportPadding, wrapperRect.top - menuHeight - 8)
+        : Math.min(window.innerHeight - viewportPadding - menuHeight, wrapperRect.bottom + 8);
+
+      setMenuPlacement(nextPlacement);
+      setMenuStyle({
+        position: 'fixed',
+        top: `${nextTop}px`,
+        left: `${nextLeft}px`,
+        width: `${nextWidth}px`,
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [isOpen, currentValue, options]);
+
+  const menuContent = isOpen && (filteredOptions.length > 0 || canUseTypedValue) ? (
+    <div
+      ref={menuRef}
+      className={`qt-room-combobox-menu ${menuPlacement === 'up' ? 'open-up' : ''}`}
+      style={menuStyle || undefined}
+    >
+      {canUseTypedValue && (
+        <button
+          type="button"
+          className="qt-room-combobox-option qt-room-combobox-option-create"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => commitValue(currentValue.trim())}
+        >
+          Use "{currentValue.trim()}"
+        </button>
+      )}
+
+      {filteredOptions.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={`qt-room-combobox-option ${option === currentValue ? 'active' : ''}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => commitValue(option)}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  return (
+    <div
+      ref={wrapperRef}
+      className={`qt-room-combobox ${isOpen ? 'open' : ''} ${menuPlacement === 'up' ? 'open-up' : ''}`}
+    >
+      <input
+        ref={inputRef}
+        className="qt-field qt-room-field"
+        name="room"
+        value={currentValue}
+        placeholder={placeholder}
+        autoComplete="off"
+        onChange={(e) => {
+          onValueChange(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => setIsOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setIsOpen(true);
+          }
+          if (e.key === 'Escape') {
+            setIsOpen(false);
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="qt-room-combobox-toggle"
+        aria-label="Show room suggestions"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setIsOpen((previous) => !previous);
+          inputRef.current?.focus();
+        }}
+      >
+        <span className="qt-room-combobox-caret" />
+      </button>
+
+      {typeof document !== 'undefined' && menuContent ? createPortal(menuContent, document.body) : null}
+    </div>
+  );
+}
+
 
 export default function Quotation({ cart }) {
   // We no longer restore the draft on mount to ensure the page feels fresh on reload
@@ -98,6 +268,23 @@ export default function Quotation({ cart }) {
   );
   const [historySearchTerm, setHistorySearchTerm] = useState('');
 
+  const customRoomOptions = Array.from(
+    new Set(
+      items
+        .map((item) => (item.room || '').trim())
+        .filter(Boolean)
+    )
+  )
+    .filter(
+      (roomName) =>
+        !DEFAULT_ROOM_OPTIONS.some(
+          (defaultOption) => defaultOption.toLowerCase() === roomName.toLowerCase()
+        )
+    )
+    .sort((a, b) => a.localeCompare(b));
+
+  const roomOptions = [...DEFAULT_ROOM_OPTIONS, ...customRoomOptions];
+
   const staffOptions = [
     { name: 'Harsh Bhai', phone: '+91 82385 21277' },
     { name: 'Karan Bhai', phone: '+91 82009 17069' },
@@ -118,22 +305,7 @@ export default function Quotation({ cart }) {
     }
   };
 
-  // Keyboard shortcut for Catalog Sync (Shift + R)
-  useEffect(() => {
-    const handleKeyDown = async (e) => {
-      if (e.shiftKey && e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        try {
-          const res = await axios.get(`${BASE}/refresh`);
-          alert(res.data.message || 'Catalog indexing started in background.');
-        } catch (err) {
-          alert('Catalog sync failed.');
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  // Keyboard shortcut for Catalog Sync removed per user request to allow standard browser hard refresh
 
   const fetchHistory = async () => {
     try {
@@ -238,15 +410,19 @@ export default function Quotation({ cart }) {
         gst: data.gst || '',
         address: data.address || '',
       });
-      setItems(data.items || []);
+      setItems(data.items && data.items.length > 0 ? data.items : [createBlankItem()]);
       setDiscountPercent(data.discount_percent || 0);
       setGstRate(data.gst_rate || 18);
-      if (data.gst) setShowGstInput(true);
+      setShowGstInput(Boolean(data.gst));
       setGeneratedPdfUrl(null);
       setGeneratedPdfServerUrl('');
       setGeneratedPdfServerName('');
       setQuoteNumber(data.quote_number || '');
       setQuoteDate('');
+      setShowBgLogo(Boolean(data.show_bg_logo));
+      setMadeBy(data.made_by || '');
+      setMadeByPhone(data.made_by_phone || '');
+      setMadeByEmail(data.made_by_email || '');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       alert('Failed to load quotation');
@@ -267,10 +443,18 @@ export default function Quotation({ cart }) {
     setClient({ ...client, [e.target.name]: e.target.value });
   };
 
+  const handleItemValueChange = (index, fieldName, fieldValue) => {
+    setItems((previousItems) =>
+      previousItems.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, [fieldName]: fieldValue }
+          : item
+      )
+    );
+  };
+
   const handleItemChange = (index, e) => {
-    const newItems = [...items];
-    newItems[index][e.target.name] = e.target.value;
-    setItems(newItems);
+    handleItemValueChange(index, e.target.name, e.target.value);
   };
 
   const addItem = () => {
@@ -774,12 +958,11 @@ export default function Quotation({ cart }) {
                   placeholder="Item Name"
                   onChange={(e) => handleItemChange(index, e)}
                 />
-                <input
-                  className="qt-field qt-room-field"
-                  name="room"
+                <RoomCombobox
                   value={item.room || ''}
-                  placeholder="Room/Section (e.g. Master Bath)"
-                  onChange={(e) => handleItemChange(index, e)}
+                  options={roomOptions}
+                  placeholder="Room/Section"
+                  onValueChange={(nextValue) => handleItemValueChange(index, 'room', nextValue)}
                 />
                 <input
                   className="qt-field"
@@ -826,12 +1009,12 @@ export default function Quotation({ cart }) {
               </div>
 
               <div className="qt-detail-wrap">
-                <textarea
+              <textarea
                   className="qt-detail-area"
                   name="rawText"
                   value={item.rawText}
                   placeholder="Complete item details (specifications, size, etc.)"
-                  onChange={(e) => handleItemChange(index, e)}
+                  readOnly
                 />
               </div>
             </article>

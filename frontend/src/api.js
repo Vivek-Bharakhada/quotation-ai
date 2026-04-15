@@ -2,7 +2,7 @@ import { readString, removeValue, writeString } from './utils/storage';
 
 export const API_OVERRIDE_KEY = 'quotation-ai/api-base-url';
 // Use the current IP/Hostname where the frontend is loaded, so it works seamlessly on mobile over Wi-Fi
-export const DEFAULT_API_BASE = typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : 'http://localhost:8000';
+export const DEFAULT_API_BASE = 'http://localhost:8000';
 
 const normalizeBase = (value) => String(value || '').trim().replace(/\/+$/, '');
 

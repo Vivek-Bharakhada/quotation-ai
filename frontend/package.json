@@ -22,18 +22,74 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "build:app": "cmd /c \"set BUILD_PATH=build_app&& react-scripts build\"",
-    "desktop:start": "electron .",
-    "desktop:dev": "set ELECTRON_START_URL=http://localhost:3000&& electron .",
+    "desktop:start": "electron electron/main.js",
+    "desktop:dev": "set \"ELECTRON_START_URL=http://localhost:3000\" && electron electron/main.js",
     "mobile:sync": "npx cap sync",
     "mobile:open:android": "npx cap open android",
     "mobile:open:ios": "npx cap open ios",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.quotationai.app",
+    "productName": "Shreeji Ceramica",
+    "directories": {
+      "output": "dist_client"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend_sidecar_internal",
+        "to": "backend_sidecar"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "dir"
+      ],
+      "icon": null
+    },
+    "nsis": {
+      "artifactName": "Shreeji Ceramica Setup ${version}.${ext}",
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "uninstallDisplayName": "Shreeji Ceramica",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Shreeji Ceramica",
+      "runAfterFinish": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "asar": false,
+    "compression": "store",
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "extends": null
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.1",
     "@capacitor/core": "^7.0.1",
-    "electron": "^35.0.0"
+    "electron": "^35.0.0",
+    "electron-builder": "^26.8.1"
   },
   "eslintConfig": {
     "extends": [

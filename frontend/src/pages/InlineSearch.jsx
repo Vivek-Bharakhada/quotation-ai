@@ -268,7 +268,13 @@ export default function InlineSearch({ onAdd, disabled = false }) {
 
       {!loading && !error && hasResults && suggestions.map((s, idx) => (
         <div
-          key={idx}
+          key={
+            s?.raw_item?.search_code
+            || s?.raw_item?.name
+            || s?.full_name
+            || s?.text
+            || idx
+          }
           className="sp-suggestion-item"
           onMouseDown={(e) => {
             e.preventDefault();

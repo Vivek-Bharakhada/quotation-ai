@@ -1,6 +1,7 @@
 import os
 import urllib.request
 from datetime import datetime
+from html import escape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
@@ -12,6 +13,68 @@ COMPANY_TAGLINE  = "Redefining Luxury"
 COMPANY_PHONE    = "+91 9033745455"
 COMPANY_EMAIL    = "shreejiceramica303@gmail.com"
 COMPANY_LOGO_URL = "https://www.shreejiceramica.com/tiles/vadodara-logo.png"
+
+def _to_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _safe_quantity(value, default=1.0):
+    parsed = _to_float(value, default)
+    return parsed if parsed > 0 else default
+
+def _normalize_room_name(value):
+    room_name = str(value or "").strip()
+    return room_name.upper() if room_name else "GENERAL"
+
+def _format_quantity(value):
+    qty = _safe_quantity(value, 1.0)
+    return str(int(qty)) if float(qty).is_integer() else f"{qty:g}"
+
+def _line_total(item):
+    qty = _safe_quantity(item.get("quantity"), 1.0)
+    price = _to_float(item.get("price"), 0.0)
+    disc = _to_float(item.get("discount"), 0.0)
+    gross = qty * price
+    return gross - (gross * disc / 100.0)
+
+def _line_taxable_total(item, discount_percent=0.0):
+    line_after_item_discount = _line_total(item)
+    global_discount_amount = line_after_item_discount * (discount_percent / 100.0)
+    return line_after_item_discount - global_discount_amount
+
+def _resolve_item_image(base_dir, item):
+    img_p = item.get("image")
+    if img_p and str(img_p).startswith("/static/images/"):
+        real_p = os.path.join(base_dir, str(img_p).lstrip("/"))
+        if os.path.exists(real_p):
+            try:
+                return RLImage(real_p, width=42, height=42, kind='proportional')
+            except Exception:
+                return ""
+    return ""
+
+def _build_item_description(item, styles):
+    raw = str(item.get("rawText") or item.get("name") or "Unknown Item")
+    parts = [segment.strip() for segment in raw.split("\n") if segment.strip()]
+    name_str = str(item.get("name") or (parts[0] if parts else "Unknown Item")).strip() or "Unknown Item"
+    extra_lines = parts[1:] if len(parts) > 1 else []
+    extra_html = "<br/>".join(escape(line) for line in extra_lines)
+    description_html = f"<b>{escape(name_str)}</b>"
+    if extra_html:
+        description_html += f"<br/>{extra_html}"
+
+    return Paragraph(
+        description_html,
+        ParagraphStyle(
+            'ItemDesc',
+            parent=styles['Normal'],
+            fontSize=8,
+            leading=10,
+            textColor=colors.HexColor("#1e293b"),
+        )
+    )
 
 def _get_logo_path(base_dir):
     """Return local logo path; download from web if not already saved."""
@@ -30,6 +93,10 @@ def generate_quote(data):
     show_bg_logo  = data.get("show_bg_logo", False)
     made_by       = str(data.get("made_by") or "").strip()
     made_by_phone = str(data.get("made_by_phone") or "").strip()
+    items         = data.get("items", [])
+    discount_percent = _to_float(data.get("discount_percent", 0))
+    gst_rate      = _to_float(data.get("gst_rate", 0))
+    output_path   = str(data.get("output_path") or "quotation.pdf").strip() or "quotation.pdf"
     quote_number  = data.get("quote_number", "")
     today_str     = datetime.now().strftime("%d %B %Y")
     
@@ -55,7 +122,7 @@ def generate_quote(data):
             canvas.restoreState()
 
     # Document setup
-    doc = SimpleDocTemplate("quotation.pdf", pagesize=A4,
+    doc = SimpleDocTemplate(output_path, pagesize=A4,
                             rightMargin=30, leftMargin=30,
                             topMargin=20, bottomMargin=25)
     
@@ -161,72 +228,280 @@ def generate_quote(data):
 
     # ── 4. Items Table section ─────────────────────────────────────────────
     # Reverting to EXACT image format: S.No, Image, Item Description, Qty, Price, Disc(%), Amount
-    header_row = ["S.No", "Image", "Item Description", "Qty", "Price", "Disc(%)", "Amount"]
-    table_data = [header_row]
-    
-    for idx, item in enumerate(data.get("items", [])):
-        qty   = int(item.get("quantity") or 1)
-        price = float(item.get("price") or 0)
-        disc  = float(item.get("discount") or 0)
-        total = qty * price
-        amount = total - (total * disc / 100)
-        
-        # Image object
-        img_obj = ""
-        img_p = item.get("image")
-        if img_p and img_p.startswith("/static/images/"):
-            real_p = os.path.join(base_dir, img_p.lstrip("/"))
-            if os.path.exists(real_p):
-                img_obj = RLImage(real_p, width=45, height=45)
-        
-        # Description styling
-        raw = item.get("rawText", item.get("name", "Unknown Item"))
-        parts = raw.split("\n", 1)
-        name_str = parts[0].strip().replace("&", "&amp;")
-        desc_str = parts[1].replace("\n", "<br/>").replace("&", "&amp;") if len(parts) > 1 else ""
-        desc_para = Paragraph(f"<b>{name_str}</b><br/>{desc_str}", ParagraphStyle('P', parent=styles['Normal'], fontSize=8.5, leading=10))
-        
-        table_data.append([str(idx+1), img_obj, desc_para, str(qty), f"{price:,.2f}", f"{disc:g}%" if disc > 0 else "-", f"{amount:,.2f}"])
+    room_sections = []
+    room_lookup = {}
+    for item in items:
+        room_name = _normalize_room_name(item.get("room"))
+        if room_name not in room_lookup:
+            room_lookup[room_name] = {
+                "name": room_name,
+                "items": [],
+                "display_total": 0.0,
+                "taxable_total": 0.0,
+            }
+            room_sections.append(room_lookup[room_name])
 
-    # Totals Section
-    subtotal = float(data.get("subtotal", 0))
-    gst_rate = float(data.get("gst_rate", 0))
-    gst_amt  = float(data.get("gst_amount", 0))
-    grand    = float(data.get("grand_total", 0))
-    
-    table_data.append(["", "", "", "Subtotal:", f"Rs {subtotal:,.2f}", "", ""])
-    table_data.append(["", "", "", f"GST ({gst_rate:g}%):", f"+ Rs {gst_amt:,.2f}", "", ""])
-    table_data.append(["", "", "", "Grand Total:", f"Rs {grand:,.2f}", "", ""])
+        room_lookup[room_name]["items"].append(item)
+        room_lookup[room_name]["display_total"] += _line_total(item)
+        room_lookup[room_name]["taxable_total"] += _line_taxable_total(item, discount_percent)
 
-    # Table Appearance
-    col_w = [30, 60, 230, 45, 65, 45, 75]
-    t = Table(table_data, colWidths=col_w)
-    
-    t_style = TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f1f5f9")), # Light Header
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (2,1), (2,-len(table_data)), 'LEFT'),
-        ('ALIGN', (4,1), (-1,-len(table_data)), 'RIGHT'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('INNERGRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
-        ('BOX', (0,0), (-1,-1), 0.25, colors.lightgrey),
-    ])
-    
-    # Custom Footer Styling
-    n_items = len(data.get("items", []))
-    for r in range(n_items+1, len(table_data)):
-        t_style.add('SPAN', (0,r), (2,r)) # Merge left
-        t_style.add('SPAN', (4,r), (6,r)) # Merge right for values
-        t_style.add('ALIGN', (3,r), (3,r), 'RIGHT')
-        t_style.add('ALIGN', (4,r), (4,r), 'RIGHT')
-        t_style.add('FONTNAME', (3,r), (-1,r), 'Helvetica-Bold')
-        t_style.add('BACKGROUND', (0,r), (-1,r), colors.white)
+    show_room_sections = any(str(item.get("room") or "").strip() for item in items)
+    subtotal = _to_float(data.get("subtotal", 0))
+    gst_amt  = _to_float(data.get("gst_amount", 0))
+    grand    = _to_float(data.get("grand_total", 0))
+
+    if show_room_sections:
+        section_heading_style = ParagraphStyle(
+            'RoomHeading',
+            parent=styles['Normal'],
+            fontSize=11.5,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor("#1f3d67"),
+            spaceAfter=6,
+        )
+        section_cell_style = ParagraphStyle(
+            'RoomCell',
+            parent=styles['Normal'],
+            fontSize=7.6,
+            leading=9,
+            textColor=colors.HexColor("#334155"),
+            alignment=1,
+        )
+
+        for section in room_sections:
+            elements.append(Paragraph(section["name"], section_heading_style))
+
+            section_rows = [[
+                "#",
+                "IMG",
+                "Item Details",
+                "SKU",
+                "Size",
+                "Qty",
+                "Rate",
+                "Disc %",
+                "Amount",
+            ]]
+
+            for item_index, item in enumerate(section["items"], start=1):
+                qty = _safe_quantity(item.get("quantity"), 1.0)
+                price = _to_float(item.get("price"), 0.0)
+                disc = _to_float(item.get("discount"), 0.0)
+                amount = _line_total(item)
+
+                section_rows.append([
+                    str(item_index),
+                    _resolve_item_image(base_dir, item),
+                    _build_item_description(item, styles),
+                    Paragraph(escape(str(item.get("sku") or "-")), section_cell_style),
+                    Paragraph(escape(str(item.get("size") or "-")), section_cell_style),
+                    Paragraph(escape(_format_quantity(qty)), section_cell_style),
+                    Paragraph(escape(f"Rs. {price:,.2f}"), section_cell_style),
+                    Paragraph(escape(f"{disc:g}%"), section_cell_style),
+                    Paragraph(
+                        escape(f"Rs. {amount:,.2f}"),
+                        ParagraphStyle('AmountCell', parent=section_cell_style, fontName='Helvetica-Bold', alignment=2)
+                    ),
+                ])
+
+            section_rows.append([
+                Paragraph("<b>TOTAL</b>", section_cell_style),
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                Paragraph(
+                    f"<b>Rs. {section['display_total']:,.2f}</b>",
+                    ParagraphStyle('SectionTotal', parent=section_cell_style, fontName='Helvetica-Bold', alignment=2)
+                ),
+            ])
+
+            section_table = Table(
+                section_rows,
+                colWidths=[20, 42, 170, 48, 50, 30, 58, 39, 75],
+                repeatRows=1,
+            )
+
+            last_row_index = len(section_rows) - 1
+            section_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (2, 1), (4, last_row_index - 1), 'LEFT'),
+                ('ALIGN', (5, 1), (7, last_row_index - 1), 'CENTER'),
+                ('ALIGN', (8, 1), (8, last_row_index), 'RIGHT'),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dee8")),
+                ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.HexColor("#d7dee8")),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('SPAN', (0, last_row_index), (7, last_row_index)),
+                ('BACKGROUND', (0, last_row_index), (-1, last_row_index), colors.white),
+            ]))
+
+            elements.append(section_table)
+            elements.append(Spacer(1, 12))
+
+        overall_totals = [["Subtotal", f"Rs. {subtotal:,.2f}"]]
+        if discount_percent > 0:
+            discount_amount = subtotal - (grand - gst_amt)
+            overall_totals.append([f"Discount ({discount_percent:g}%)", f"- Rs. {discount_amount:,.2f}"])
+        overall_totals.extend([
+            [f"GST ({gst_rate:g}%)", f"Rs. {gst_amt:,.2f}"],
+            ["Grand Total", f"Rs. {grand:,.2f}"],
+        ])
+
+        overall_totals_table = Table(overall_totals, colWidths=[140, 120], hAlign='RIGHT')
+        overall_totals_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dee8")),
+            ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.HexColor("#d7dee8")),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.HexColor("#0f2f57")),
+        ]))
+        elements.append(overall_totals_table)
+        elements.append(Spacer(1, 18))
+    else:
+        header_row = ["S.No", "Image", "Item Description", "Qty", "Price", "Disc(%)", "Amount"]
+        table_data = [header_row]
         
-    t_style.add('TEXTCOLOR', (4, -1), (-1, -1), colors.HexColor("#0284c7")) # Grand total blue
-    t.setStyle(t_style)
-    elements.append(t)
-    elements.append(Spacer(1, 40))
+        for idx, item in enumerate(items):
+            qty = _safe_quantity(item.get("quantity"), 1.0)
+            price = _to_float(item.get("price"), 0.0)
+            disc = _to_float(item.get("discount"), 0.0)
+            amount = _line_total(item)
+            
+            table_data.append([
+                str(idx + 1),
+                _resolve_item_image(base_dir, item),
+                _build_item_description(item, styles),
+                _format_quantity(qty),
+                f"{price:,.2f}",
+                f"{disc:g}%" if disc > 0 else "-",
+                f"{amount:,.2f}",
+            ])
+
+        table_data.append(["", "", "", "Subtotal:", f"Rs {subtotal:,.2f}", "", ""])
+        table_data.append(["", "", "", f"GST ({gst_rate:g}%):", f"+ Rs {gst_amt:,.2f}", "", ""])
+        table_data.append(["", "", "", "Grand Total:", f"Rs {grand:,.2f}", "", ""])
+
+        t = Table(table_data, colWidths=[30, 60, 230, 45, 65, 45, 75])
+        t_style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (2, 1), (2, -len(table_data)), 'LEFT'),
+            ('ALIGN', (4, 1), (-1, -len(table_data)), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ('BOX', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+        ])
+        
+        n_items = len(items)
+        for r in range(n_items + 1, len(table_data)):
+            t_style.add('SPAN', (0, r), (2, r))
+            t_style.add('SPAN', (4, r), (6, r))
+            t_style.add('ALIGN', (3, r), (3, r), 'RIGHT')
+            t_style.add('ALIGN', (4, r), (4, r), 'RIGHT')
+            t_style.add('FONTNAME', (3, r), (-1, r), 'Helvetica-Bold')
+            t_style.add('BACKGROUND', (0, r), (-1, r), colors.white)
+            
+        t_style.add('TEXTCOLOR', (4, -1), (-1, -1), colors.HexColor("#0284c7"))
+        t.setStyle(t_style)
+        elements.append(t)
+        elements.append(Spacer(1, 18))
+
+    if show_bg_logo:
+        # Room summary shown above Terms & Conditions in branded PDF.
+        if room_sections:
+            room_summary_title = ParagraphStyle(
+                'RSTitle',
+                parent=styles['Normal'],
+                fontSize=11,
+                fontName='Helvetica-Bold',
+                textColor=colors.white,
+                alignment=1,
+            )
+            room_summary_label = ParagraphStyle(
+                'RSLabel',
+                parent=styles['Normal'],
+                fontSize=10.5,
+                fontName='Helvetica',
+                textColor=colors.HexColor("#1e3a5f"),
+                alignment=1,
+            )
+            room_summary_value = ParagraphStyle(
+                'RSValue',
+                parent=styles['Normal'],
+                fontSize=10.5,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor("#1e3a5f"),
+                alignment=2,
+            )
+            room_summary_final_label = ParagraphStyle(
+                'RSFinalLabel',
+                parent=styles['Normal'],
+                fontSize=11,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor("#0f2f57"),
+                alignment=1,
+            )
+            room_summary_final_value = ParagraphStyle(
+                'RSFinalValue',
+                parent=styles['Normal'],
+                fontSize=11,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor("#c99732"),
+                alignment=2,
+            )
+
+            room_summary_data = [[Paragraph("SUMMARY OF ALL BATH ROOM", room_summary_title), ""]]
+            for section in room_sections:
+                room_summary_data.append([
+                    Paragraph(section["name"], room_summary_label),
+                    Paragraph(f"Rs. {section['taxable_total']:,.2f}", room_summary_value),
+                ])
+
+            gst_label = f"GST ({gst_rate:g}%)" if gst_rate else "GST"
+            room_summary_data.append([
+                Paragraph(gst_label, room_summary_label),
+                Paragraph(f"Rs. {gst_amt:,.2f}", room_summary_value),
+            ])
+            room_summary_data.append([
+                Paragraph("FINAL AMOUNT", room_summary_final_label),
+                Paragraph(f"Rs. {grand:,.2f}", room_summary_final_value),
+            ])
+
+            room_summary_table = Table(room_summary_data, colWidths=[410, 125])
+            room_summary_table.setStyle(TableStyle([
+                ('SPAN', (0, 0), (1, 0)),
+                ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#1f3d67")),
+                ('TEXTCOLOR', (0, 0), (1, 0), colors.white),
+                ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor("#d7dee8")),
+                ('INNERGRID', (0, 1), (-1, -1), 0.35, colors.HexColor("#d7dee8")),
+                ('BACKGROUND', (0, -1), (1, -1), colors.HexColor("#f4f6f9")),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            elements.append(room_summary_table)
+            elements.append(Spacer(1, 18))
+        else:
+            elements.append(Spacer(1, 10))
+    else:
+        elements.append(Spacer(1, 20))
 
     # ── 5. Footer & Signatory section ────────────────────────────────────
     if show_bg_logo:

@@ -75,6 +75,7 @@ search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
 item_code_meta_cache = {}
 _index_cache_signature = None
+_image_path_cache = None
 
 
 # INDEX_FILE is now dynamically determined in load_index
@@ -161,8 +162,11 @@ def _image_file_size(image_path: str) -> int:
     """Return the file size of a /static/images/… path, or -1 if missing."""
     if not image_path:
         return -1
-    fname = image_path.lstrip("/").replace("static/images/", "", 1).replace("static/", "", 1)
-    full = os.path.join(STATIC_IMAGES_DIR, os.path.basename(fname))
+    rel = str(image_path).lstrip("/")
+    rel = rel.replace("static/images/", "", 1).replace("static/", "", 1)
+    full = os.path.abspath(os.path.normpath(os.path.join(STATIC_IMAGES_DIR, rel)))
+    if not full.startswith(os.path.abspath(STATIC_IMAGES_DIR)):
+        return -1
     try:
         return os.path.getsize(full)
     except OSError:
@@ -397,6 +401,13 @@ def _sanitize_item_images(items):
     """
     pass
 
+
+def _normalize_item_images(items):
+    for item in items or []:
+        best_image = _best_item_image(item)
+        if best_image:
+            item["images"] = [best_image]
+
 def save_index():
     global stored_items, keyword_index
     data = {
@@ -457,6 +468,7 @@ def load_index(force: bool = False):
 
             # Strip bad/wrong product images (cover logos, tiny icons, missing files)
             _sanitize_item_images(stored_items)
+            _normalize_item_images(stored_items)
 
             # Reset caches
             search_cache = {}
@@ -522,6 +534,81 @@ def _code_like(text: str) -> bool:
 
 def _compact_alnum(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', '', text.lower())
+
+def _build_image_path_cache():
+    global _image_path_cache
+    if _image_path_cache is not None:
+        return _image_path_cache
+
+    cache = {}
+    if os.path.isdir(STATIC_IMAGES_DIR):
+        for root, _, files in os.walk(STATIC_IMAGES_DIR):
+            for filename in files:
+                stem = os.path.splitext(filename)[0]
+                compact = _compact_alnum(stem)
+                if not compact:
+                    continue
+                rel_dir = os.path.relpath(root, STATIC_IMAGES_DIR).replace("\\", "/")
+                rel_path = f"{filename}" if rel_dir == "." else f"{rel_dir}/{filename}"
+                public_path = f"/static/images/{rel_path}"
+                cache.setdefault(compact, []).append(public_path)
+
+    _image_path_cache = cache
+    return cache
+
+
+def _best_item_image(item):
+    """Prefer an exact model-name image when one exists on disk."""
+    code_meta = _get_item_code_metadata(item)
+    candidate_codes = []
+    for key in ("full_code", "search_code", "base_code"):
+        value = str(item.get(key, "") or code_meta.get(key, "")).strip()
+        if value:
+            candidate_codes.append(value)
+
+    # Preserve already attached images if they exist and resolve correctly.
+    for img_path in item.get("images") or []:
+        if not img_path:
+            continue
+        if _image_file_size(img_path) >= 0:
+            return img_path
+
+    image_cache = _build_image_path_cache()
+    for code in candidate_codes:
+        compact_code = _compact_alnum(code)
+        if not compact_code:
+            continue
+        matches = image_cache.get(compact_code)
+        if matches:
+            return matches[0]
+
+    images = item.get("images") or []
+    return images[0] if images else None
+
+
+def _special_family_override_items(query_code_meta, brand_lower: str):
+    """
+    Some product families intentionally span multiple nearby codes.
+    Keep these grouped so search returns the intended set instead of
+    leaking in visually similar combo products.
+    """
+    base_compact = query_code_meta.get("base_compact", "")
+    variant_compact = query_code_meta.get("variant_compact", "")
+    if base_compact != "1333" or variant_compact:
+        return []
+
+    allowed_compacts = {"1333cm", "1333bm", "1333pp", "1333rb", "11333lm"}
+    picked = []
+    for item in stored_items:
+        if brand_lower and brand_lower != "all" and _item_brand(item) != brand_lower:
+            continue
+        meta = _get_item_code_metadata(item)
+        if meta.get("full_compact") in allowed_compacts:
+            picked.append(item)
+
+    order = {code: idx for idx, code in enumerate(["1333cm", "1333bm", "11333lm", "1333pp", "1333rb"])}
+    picked.sort(key=lambda item: order.get(_get_item_code_metadata(item).get("full_compact", ""), 999))
+    return picked
 
 def _code_relaxed(compact_code: str) -> str:
     # Handle common OCR confusion in model codes: O/0 and I/L/1.
@@ -791,6 +878,11 @@ def search(query: str, smart: bool = False, brand: str = None):
     query_variant_compact = query_code_meta.get("variant_compact", "")
     query_full_compact = query_code_meta.get("full_compact", "")
 
+    special_family = _special_family_override_items(query_code_meta, brand_lower)
+    if special_family:
+        search_cache[cache_key] = special_family
+        return special_family
+
     # Prefer an explicit code-like token from the query (e.g. "kohler K-28220T-SL-0").
     strict_query_compact = ""
     if query_full_compact:
@@ -897,6 +989,19 @@ def search(query: str, smart: bool = False, brand: str = None):
                     token_compacts.append(tok_compact)
             best = 0.0
             quality_bonus = _item_quality_bonus(item)
+
+            # If the query points at a specific base code, keep strict matching
+            # inside that family so combo products like "1334 BG + 1333" do not
+            # leak into a plain "1333" search.
+            if query_base_compact and item_code_meta.get("base_compact") not in {query_base_compact, ""}:
+                item_base_compact = item_code_meta.get("base_compact", "")
+                if item_base_compact.endswith(query_base_compact):
+                    pass
+                elif not (
+                    query_full_compact
+                    and item_code_meta.get("full_compact") == query_full_compact
+                ):
+                    continue
 
             if query_full_compact and item_code_meta.get("full_compact"):
                 item_full_compact = item_code_meta["full_compact"]
@@ -1223,7 +1328,7 @@ def _items_to_suggestion_payload(items, limit: int = 50):
             "description": description,
             "full_name": full_name,
             "brand": item.get("brand", "Aquant"),
-            "image": item.get("images", [None])[0] if item.get("images") else None,
+            "image": _best_item_image(item),
             "raw_item": item,
         })
         if len(final_results) >= limit:
@@ -1417,7 +1522,7 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
             "description": name_desc,
             "full_name": _clean_display_text(full_name),
             "brand": s["brand"],
-            "image": s["image_list"][0] if s["image_list"] else None,
+            "image": _best_item_image(s["item"]),
             "raw_item": s["item"]
         })
 

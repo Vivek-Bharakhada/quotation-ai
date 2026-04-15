@@ -1,41 +1,38 @@
 @echo off
 setlocal
-
-title Shreeji Ceramica - Uninstall Helper
+title Shreeji Ceramica - Uninstaller
 color 0C
 
-set "USER_UNINSTALL=%LOCALAPPDATA%\Programs\Shreeji Ceramica\Uninstall Shreeji Ceramica.exe"
-set "MACHINE_UNINSTALL=%ProgramFiles%\Shreeji Ceramica\Uninstall Shreeji Ceramica.exe"
-set "PORTABLE_DIR=%LOCALAPPDATA%\Shreeji Ceramica"
+set "INSTALL_DIR=%LOCALAPPDATA%\Shreeji Ceramica"
 
-if exist "%USER_UNINSTALL%" (
-    start "" "%USER_UNINSTALL%"
-    endlocal
-    exit /b 0
-)
-
-if exist "%MACHINE_UNINSTALL%" (
-    start "" "%MACHINE_UNINSTALL%"
-    endlocal
-    exit /b 0
-)
-
-echo Proper Windows uninstaller was not found.
 echo.
-if exist "%PORTABLE_DIR%\Shreeji Ceramica.exe" (
-    echo A portable copy was found here:
-    echo %PORTABLE_DIR%
-    echo.
-    echo To remove it manually:
-    echo 1. Close the app.
-    echo 2. Delete this folder:
-    echo    %PORTABLE_DIR%
-    echo 3. Delete Desktop and Start Menu shortcuts if they still exist.
+echo  ===================================================
+echo   Shreeji Ceramica - Uninstaller
+echo  ===================================================
+echo.
+echo  This will remove Shreeji Ceramica from your computer.
+echo  Press any key to continue or close this window to cancel.
+pause >nul
+
+taskkill /F /IM "Shreeji Ceramica.exe" /T 2>nul
+
+if exist "%INSTALL_DIR%" (
+    rmdir /s /q "%INSTALL_DIR%"
+    echo  Software removed.
 ) else (
-    echo If the app was installed using Setup, open:
-    echo Settings ^> Apps ^> Installed apps ^> Shreeji Ceramica
+    echo  Software folder not found.
 )
 
+set "DESKTOP_LNK=%USERPROFILE%\Desktop\Shreeji Ceramica.lnk"
+if exist "%DESKTOP_LNK%" del /q "%DESKTOP_LNK%" && echo  Desktop shortcut removed.
+
+set "STARTMENU_LNK=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Shreeji Ceramica.lnk"
+if exist "%STARTMENU_LNK%" del /q "%STARTMENU_LNK%" && echo  Start Menu shortcut removed.
+
+echo.
+echo  ===================================================
+echo   Uninstall complete!
+echo  ===================================================
 echo.
 pause
 endlocal

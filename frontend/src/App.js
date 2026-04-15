@@ -296,21 +296,6 @@ function App() {
           </div>
 
           <div className="nav-actions">
-            <div className="nav-meta">
-              <span className={`status-chip ${isOnline ? 'online' : 'offline'}`}>
-                {isOnline ? 'Online' : 'Offline'}
-              </span>
-              <span className={`status-chip ${isInstalled ? 'installed' : 'browser'}`}>
-                {isInstalled ? 'App Mode' : 'Browser Mode'}
-              </span>
-            </div>
-
-            {!isInstalled && (
-              <button onClick={handleInstallApp} className="install-btn" title="Install this app">
-                Install App
-              </button>
-            )}
-
             <button
               onClick={toggleTheme}
               className="theme-toggle"
@@ -318,14 +303,6 @@ function App() {
               aria-pressed={theme === 'dark'}
             >
               {theme === 'light' ? 'Dark' : 'Light'}
-            </button>
-
-            <button className="nav-icon-btn" onClick={openSettings} title="App and backend settings">
-              Settings
-            </button>
-
-            <button className={`sync-btn ${syncing ? 'is-syncing' : ''}`} onClick={handleSync} disabled={syncing}>
-              {syncing ? 'Syncing...' : 'Sync Catalogs'}
             </button>
           </div>
         </div>

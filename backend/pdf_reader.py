@@ -2,6 +2,7 @@ import fitz  # PyMuPDF
 import os
 import re
 import hashlib
+import json
 from collections import defaultdict
 
 from PIL import Image, ImageChops, ImageOps
@@ -2335,22 +2336,19 @@ def extract_content(pdf_path, max_pages=None):
     # ── POST-PROCESSING: Inherit missing images & prices from siblings ──
     from collections import defaultdict as _dd
 
-    # Pass 1: Group by exact base code
+    # Pass 1: Group by exact model code.
+    # This keeps variants like "2638 AB" and "2638 G" from borrowing each
+    # other's images just because they share the same numeric family.
     _base_groups = _dd(list)
     for item in content_list:
-        code = item.get("search_code", "") or item.get("name", "")
-        parts = code.split()
-        base = parts[0] if parts else code
-        # For combined codes like "1962 + 1963 G", use "1962 + 1963"
-        if "+" in code:
-            plus_idx = code.index("+")
-            after_plus = code[plus_idx+1:].strip()
-            after_parts = after_plus.split()
-            if after_parts and after_parts[0].isdigit():
-                base = code[:plus_idx].strip() + " + " + after_parts[0]
-            else:
-                base = code
-        _base_groups[base].append(item)
+        code = clean_text(item.get("search_code", "") or item.get("name", ""))
+        if not code:
+            continue
+
+        # Keep the full code as the grouping key. Only normalize trivial
+        # whitespace so an exact code like "2638 G" still groups together.
+        exact_key = re.sub(r"\s+", " ", code).strip()
+        _base_groups[exact_key].append(item)
 
     _inherit_count_img = 0
     _inherit_count_price = 0
@@ -2366,47 +2364,6 @@ def extract_content(pdf_path, max_pages=None):
             if str(it.get("price", "0")) in ("", "0") and donor_price:
                 it["price"] = donor_price["price"]
                 _inherit_count_price += 1
-
-    # Pass 2: For still-missing items, try dash-prefix siblings
-    # e.g. "1424-200" can inherit from "1424", "1434-750" from "1434-600"
-    _still_missing_img = [it for it in content_list if not it.get("images")]
-    _still_missing_price = [it for it in content_list if str(it.get("price", "0")) in ("", "0")]
-
-    # Build a lookup: numeric prefix -> items with image/price
-    _prefix_img_donors = _dd(list)
-    _prefix_price_donors = _dd(list)
-    for item in content_list:
-        code = item.get("search_code", "") or ""
-        # Extract numeric prefix (e.g. "1424" from "1424-200 BRG")
-        m = re.match(r'^(\d{3,})', code)
-        if m:
-            prefix = m.group(1)
-            if item.get("images"):
-                _prefix_img_donors[prefix].append(item)
-            if str(item.get("price", "0")) not in ("", "0"):
-                _prefix_price_donors[prefix].append(item)
-
-    for it in _still_missing_img:
-        code = it.get("search_code", "") or ""
-        m = re.match(r'^(\d{3,})', code)
-        if not m:
-            continue
-        prefix = m.group(1)
-        donors = _prefix_img_donors.get(prefix, [])
-        if donors:
-            it["images"] = list(donors[0]["images"])
-            _inherit_count_img += 1
-
-    for it in _still_missing_price:
-        code = it.get("search_code", "") or ""
-        m = re.match(r'^(\d{3,})', code)
-        if not m:
-            continue
-        prefix = m.group(1)
-        donors = _prefix_price_donors.get(prefix, [])
-        if donors:
-            it["price"] = donors[0]["price"]
-            _inherit_count_price += 1
 
     if _inherit_count_img or _inherit_count_price:
         print(f"   [INHERIT] Fixed {_inherit_count_img} missing images, {_inherit_count_price} missing prices from siblings")

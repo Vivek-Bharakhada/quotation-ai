@@ -155,15 +155,17 @@
   top: calc(100% + 10px);
   left: 0;
   right: 0;
-  background: var(--card-bg) !important;
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--border-color);
-  border-top: 5px solid var(--primary-color);
-  border-radius: 1.5rem;
-  box-shadow: 0 40px 60px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(2, 6, 23, 0.96) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 4px solid var(--primary-color);
+  border-radius: 1.35rem;
+  box-shadow: 0 30px 60px -28px rgba(2, 6, 23, 0.92);
+  color: #e2e8f0;
   overflow-x: hidden;
-  z-index: 99999 !important;
-  padding: 1rem;
+  z-index: 99999;
+  padding: 0.85rem;
   max-height: 500px;
   overflow-y: auto;
 }
@@ -192,17 +194,17 @@
   align-items: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-radius: 1.2rem;
+  border-radius: 1rem;
   margin-bottom: 0.5rem;
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .sp-suggestion-item:hover {
-  background: var(--card-bg);
-  border-color: var(--primary-color);
-  transform: translateX(8px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(190, 30, 45, 0.35);
+  transform: translateX(6px);
+  box-shadow: 0 12px 24px -20px rgba(2, 6, 23, 0.9);
 }
 
 .sp-suggestion-item:active {
@@ -250,14 +252,14 @@
 
 .sp-sugg-text {
   font-weight: 800;
-  color: var(--text-primary);
+  color: #f8fafc;
   font-size: 1.15rem;
   line-height: 1;
 }
 
 .sp-sugg-desc {
   font-size: 0.86rem;
-  color: var(--text-dim);
+  color: #94a3b8;
   font-weight: 500;
   max-width: 500px;
   white-space: nowrap;
@@ -268,10 +270,10 @@
 .sp-sugg-brand {
   font-size: 0.7rem;
   font-weight: 900;
-  background: #1e293b;
+  background: linear-gradient(135deg, #be1e2d, #881337);
   color: #ffffff;
   padding: 0.4rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: 999px;
   text-transform: uppercase;
   flex-shrink: 0;
 }
@@ -303,9 +305,9 @@
 }
 
 .sp-search-btn {
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(95, 99, 104, 0.35);
   background: var(--primary-gradient);
-  color: #ffffff;
+  color: var(--primary-color);
   border-radius: 1rem;
   padding: 0.98rem 1.7rem;
   font-size: 0.9rem;
@@ -313,12 +315,12 @@
   letter-spacing: 0.04em;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-  box-shadow: 0 14px 24px -18px rgba(190, 30, 45, 0.8);
+  box-shadow: 0 14px 24px -18px rgba(95, 99, 104, 0.7);
 }
 
 .sp-search-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 28px -16px rgba(190, 30, 45, 0.88);
+  box-shadow: 0 16px 28px -16px rgba(95, 99, 104, 0.85);
 }
 
 .sp-search-btn:disabled {
@@ -577,19 +579,20 @@
 
 .sp-add-btn {
   flex: 1;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, #0f172a, #1e293b);
-  color: #ffffff;
+  border: 1px solid rgba(95, 99, 104, 0.35);
+  background: var(--primary-gradient);
+  color: var(--primary-color);
   padding: 0.74rem 0.76rem;
 }
 
 .sp-add-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 20px -16px rgba(15, 23, 42, 0.95);
+  box-shadow: 0 12px 20px -16px rgba(95, 99, 104, 0.75);
 }
 
 .sp-add-btn.added {
   background: linear-gradient(135deg, #10b981, #0c9d6f);
+  color: #ffffff;
   cursor: default;
 }
 
@@ -648,9 +651,9 @@
   width: 100%;
   margin-top: 0.92rem;
   padding: 0.9rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(95, 99, 104, 0.35);
   background: var(--primary-gradient);
-  color: #ffffff;
+  color: var(--primary-color);
   font-size: 0.85rem;
   letter-spacing: 0.04em;
 }
@@ -719,14 +722,14 @@
 }
 
 .dark-theme .sp-suggestions-list {
-  background: rgba(15, 23, 42, 0.9);
-  border-color: rgba(51, 65, 85, 0.5);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: 0 30px 60px -28px rgba(2, 6, 23, 0.95);
 }
 
 .dark-theme .sp-suggestion-item:hover {
-  background: rgba(30, 41, 59, 1);
-  border-color: rgba(14, 165, 233, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(190, 30, 45, 0.35);
 }
 
 .dark-theme .sp-sugg-img {
@@ -742,7 +745,7 @@
 }
 
 .dark-theme .sp-sugg-brand {
-  background: var(--primary-gradient);
+  background: linear-gradient(135deg, #be1e2d, #881337);
   color: #ffffff;
 }
 
