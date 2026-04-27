@@ -18,8 +18,8 @@ env/
 
 # Large index files (auto-generated, can re-index)
 backend/search_index.json
-backend/search_index_v2.json
-search_index_v2.json
+# search_index_v2.json is needed for deployment — DO NOT ignore
+# backend/search_index_v2.json
 
 # Uploaded PDFs (large binary files)
 backend/uploads/*.pdf

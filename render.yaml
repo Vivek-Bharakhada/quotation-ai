@@ -9,9 +9,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: IS_CLOUD
+        value: "true"
     disk:
       name: quotation-data
       mountPath: /opt/render/project/src
-      sizeGB: 1
-
-
+      sizeGB: 2
