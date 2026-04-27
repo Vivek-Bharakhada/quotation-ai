@@ -5,57 +5,53 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
-dist/
-build/
-.eggs/
 *.egg
 
-# Virtual Environment
+# Virtual Environments
 backend/venv/
 venv/
 env/
 .venv/
 
-# Large index files (auto-generated, can re-index)
+# Search index v1 only (v2 is needed for deployment)
 backend/search_index.json
-# search_index_v2.json is needed for deployment — DO NOT ignore
-# backend/search_index_v2.json
 
-# Uploaded PDFs (large binary files)
+# Uploaded PDFs (large binary — re-upload manually on server)
 backend/uploads/*.pdf
 
-# Generated quotes history (optional - uncomment to exclude)
-# backend/quotes_history/
-
-# Generated PDFs
+# Generated quotes
 backend/quotation.pdf
 backend/test_quote.pdf
 backend/test_catalog.pdf
+backend/static/quotes/
 
 # Log files
 backend/*.log
-backend/*.txt
-# But DO include requirements.txt for deployment
-!backend/requirements.txt
 backend/backend_log.txt
 backend/backend_debug.log
 backend/run_backend.err.log
 backend/run_backend.out.log
 frontend/run_frontend.err.log
 frontend/run_frontend.out.log
+app_stdout.log
+app_stderr.log
+debug.log
 
 # Node modules
 frontend/node_modules/
 node_modules/
 
-# React build output
+# React build output & old builds
 frontend/build/
-frontend/build_app/
-frontend/build_pwa/
-frontend/build_pwa_verify/
+frontend/build_*/
+frontend/dist_client/
+frontend/dist-electron/
 frontend/android/
 frontend/ios/
-frontend/dist-electron/
+
+# Electron desktop app bundles (large, not needed for web)
+frontend/backend_sidecar_internal/
+Quotation_AI_Software_Final/
 
 # Environment variables
 .env
@@ -67,13 +63,16 @@ frontend/dist-electron/
 Thumbs.db
 desktop.ini
 
-# IDE files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Debug/test output files
+# Temporary & scratch files
+backend/tmp_*/
+tmp_crops/
+dir_output.txt
 backend/out.txt
 backend/debug_out.txt
 backend/debug_layout.txt
@@ -82,6 +81,25 @@ backend/7006_out.txt
 backend/grouping_log*.txt
 backend/test_grouping.txt
 backend/test_catalog.txt
+backend/kohler_image_*.csv
+backend/kohler_k_code_*.csv
+backend/quotes_image_report.csv
+backend/image_path_cache.json
 
-# Static quotes (generated, large)
-backend/static/quotes/
+# Backup files
+main_backup.py
+main_backup_utf8.py
+main_original.py
+backend/main_original.py
+backend/scratch/autofix_out*.txt
+backend/scratch/audit_out*.txt
+backend/scratch/pg_check.txt
+backend/scratch/last5_search.txt
+backend/scratch/verify_images_out.txt
+backend/scratch/fix_704703_result.txt
+backend/scratch/kohler_sample.txt
+backend/scratch/check704703.txt
+backend/scratch/index_format.txt
+backend/scratch/audit_summary.txt
+backend/scratch/autofix_p2_out.txt
+backend/scratch/autofix_rem_out.txt

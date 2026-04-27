@@ -1,4 +1,4 @@
-print("--- BACKEND STARTING ---")
+﻿print("--- BACKEND STARTING ---")
 print("Importing FastAPI...")
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
@@ -33,7 +33,13 @@ EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.
 _MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
 
 # BUNDLED_DIR is for read-only assets like the initial index
-BUNDLED_DIR = EXE_DIR
+BUNDLED_DIR = _MEIPASS
+if is_frozen:
+    # Handle PyInstaller 6+ --contents-directory layout
+    possible_internal = os.path.join(_MEIPASS, "_internal")
+    if os.path.isdir(possible_internal):
+        BUNDLED_DIR = possible_internal
+
 BASE_DIR = BUNDLED_DIR
 DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
 
@@ -52,24 +58,63 @@ QUOTATION_PDF_PATH = os.path.join(DATA_DIR, "quotation.pdf")
 for d in [STATIC_IMAGES_DIR, STATIC_QUOTES_DIR, UPLOAD_DIR, QUOTES_HISTORY_DIR]:
     os.makedirs(d, exist_ok=True)
 
+def _resolve_case_insensitive_path(root_dir: str, relative_path: str) -> str:
+    current = os.path.abspath(root_dir)
+    parts = [part for part in str(relative_path or "").replace("\\", "/").split("/") if part and part != "."]
+
+    for part in parts:
+        direct_path = os.path.join(current, part)
+        if os.path.exists(direct_path):
+            current = direct_path
+            continue
+
+        try:
+            entries = {entry.lower(): entry for entry in os.listdir(current)}
+        except OSError:
+            return ""
+
+        matched_name = entries.get(part.lower())
+        if not matched_name:
+            return ""
+        current = os.path.join(current, matched_name)
+
+    return current if os.path.exists(current) else ""
+
+
+def _find_image_path(filename: str) -> str:
+    normalized = str(filename or "").strip().replace("\\", "/").lstrip("/")
+    if not normalized:
+        return ""
+
+    search_roots = []
+    for root in (STATIC_IMAGES_DIR, BUNDLED_IMAGES_DIR, REPO_IMAGES_DIR):
+        if root and root not in search_roots:
+            search_roots.append(root)
+
+    # First honor exact relative paths like Aquant/9272.png.
+    for root in search_roots:
+        resolved = _resolve_case_insensitive_path(root, normalized)
+        if resolved:
+            return resolved
+
+    # Backward-compatible fallback: search by bare filename inside brand folders.
+    if "/" not in normalized:
+        target_name = normalized.lower()
+        for root in search_roots:
+            for current_root, _, files in os.walk(root):
+                for current_file in files:
+                    if current_file.lower() == target_name:
+                        return os.path.join(current_root, current_file)
+
+    return ""
+
+
 # Helper for resolving image paths (prioritize writable uploads, fallback to bundled)
 @app.get("/static/images/{filename:path}")
 def serve_image(filename: str):
-    # 1. Check in Data Dir (new uploads)
-    p1 = os.path.join(STATIC_IMAGES_DIR, filename)
-    if os.path.exists(p1): return FileResponse(p1)
-    
-    # 2. Check in Bundled Dir (catalog items)
-    p2 = os.path.join(BUNDLED_IMAGES_DIR, filename)
-    if os.path.exists(p2): return FileResponse(p2)
-    
-    # 3. Check repo source images when running from the workspace
-    p3 = os.path.join(REPO_IMAGES_DIR, filename)
-    if os.path.exists(p3): return FileResponse(p3)
-
-    # 4. Check Manual uploads folder
-    p3 = os.path.join(STATIC_IMAGES_DIR, "manual", filename)
-    if os.path.exists(p3): return FileResponse(p3)
+    resolved_path = _find_image_path(filename)
+    if resolved_path:
+        return FileResponse(resolved_path)
 
     raise HTTPException(status_code=404)
 
@@ -88,8 +133,14 @@ app.add_middleware(
 # Optional: Log errors to file for debugging bundled app
 import logging
 log_file = os.path.join(DATA_DIR, "backend_errors.log")
-logging.basicConfig(filename=log_file, level=logging.ERROR, 
-                    format='%(asctime)s %(levelname)s:%(message)s')
+try:
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.ERROR,
+        format='%(asctime)s %(levelname)s:%(message)s',
+    )
+except OSError as e:
+    print(f"Warning: file logging disabled: {e}")
 
 import threading
 
@@ -126,8 +177,6 @@ def index_local_catalogs(force=False):
                 brand = "Aquant"
             elif "kohler" in filename.lower():
                 brand = "Kohler"
-            elif "plumber" in filename.lower():
-                brand = "Plumber"
             else:
                 continue
 
@@ -140,9 +189,9 @@ def index_local_catalogs(force=False):
                         item["brand"] = brand
                 search_engine.add_to_index(None, items)
                 total_indexed += len(items)
-                print(f"✓ Indexed: {len(items)} items from {filename} as {brand}")
+                print(f"Indexed: {len(items)} items from {filename} as {brand}")
             except Exception as e:
-                print(f"✗ Error indexing {filename}: {e}")
+                print(f"Error indexing {filename}: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -404,14 +453,20 @@ def _delete_quote_record(quote_id: str) -> bool:
 
 @app.on_event("startup")
 async def startup_event():
-    import search_engine
-    _sync_cloud_catalogs_to_local()
-    # Try to load existing index first
-    if not search_engine.load_index():
-        # Only index if no saved index found
-        threading.Thread(target=index_local_catalogs, daemon=True).start()
-    else:
-        print("Using saved search index.")
+    def warm_catalog_index():
+        try:
+            import search_engine
+            _sync_cloud_catalogs_to_local()
+
+            if not search_engine.load_index() or not search_engine.stored_items:
+                print("No usable saved index found; rebuilding from local uploads...")
+                index_local_catalogs(force=True)
+            else:
+                print("Using saved search index.")
+        except Exception as e:
+            print(f"Warning: background startup warmup failed: {e}")
+
+    threading.Thread(target=warm_catalog_index, daemon=True).start()
 
 
 @app.get("/")
@@ -675,6 +730,8 @@ async def add_manual_item(
     file: UploadFile = File(None)
 ):
     import search_engine
+    if str(brand or "").strip().lower() not in search_engine.SUPPORTED_BRANDS:
+        raise HTTPException(status_code=400, detail="Only Aquant and Kohler items are allowed")
     
     image_path = None
     if file:
@@ -725,7 +782,7 @@ def ask_question(q: str):
     if len(top_result_text) > 150:
         top_result_text = top_result_text[:150] + "..."
         
-    answer = f"Top match from catalog:\n• {top_result_text}\n(See exact match details in the cards below)"
+    answer = f"Top match from catalog:\nâ€¢ {top_result_text}\n(See exact match details in the cards below)"
     return {"answer": answer}
 
 
@@ -863,7 +920,10 @@ def get_catalog_index():
         brand = item.get("brand")
         if not brand:
             src = str(item.get("source") or "Generic").lower()
-            brand = "Kohler" if "kohler" in src else "Aquant" if "aquant" in src else "Plumber" if "plumber" in src else "Generic"
+            brand = "Kohler" if "kohler" in src else "Aquant" if "aquant" in src else "Generic"
+
+        if str(brand or "").strip().lower() not in search_engine.SUPPORTED_BRANDS:
+            continue
         
         if brand not in brand_map:
             brand_map[brand] = {"name": brand, "collections": set()}
@@ -874,6 +934,7 @@ def get_catalog_index():
             brand_map[brand]["collections"].add(h)
         else:
             # Fallback for older indexed items or undetected headers
+            first_line = ""
             if "text" in item:
                 first_line = item["text"].split("\n")[0].strip()
             heading_match = re.match(r'^([A-Z\s]{4,28})', first_line)
@@ -884,16 +945,11 @@ def get_catalog_index():
 
     result = []
     # Always prioritize the big two for display
-    for b_name in ["Aquant", "Kohler", "Plumber"]:
+    for b_name in ["Aquant", "Kohler"]:
        if b_name in brand_map:
             b_data = brand_map.pop(b_name)
             cols = sorted(list(b_data["collections"])) or ["Standard Products"]
             result.append({"brand": b_name, "collections": cols[:25]})
-
-    # Add any remaining brands
-    for brand_name, b_data in sorted(brand_map.items()):
-        cols = sorted(list(b_data["collections"])) or ["Standard Products"]
-        result.append({"brand": brand_name, "collections": cols[:25]})
 
     # Save to cache
     search_engine.catalog_summary_cache = result
@@ -902,14 +958,16 @@ def get_catalog_index():
 @app.get("/catalog/browse")
 def browse_collection(brand: str, collection: str = None):
     import search_engine
+    if str(brand or "").strip().lower() not in search_engine.SUPPORTED_BRANDS:
+        return {"results": []}
+
     results = []
     brand_lower = brand.lower()
     collection_lower = (collection or "").lower()
     
     for item in search_engine.stored_items:
-        # Strict brand check using the new indexed 'brand' field
-        item_brand = item.get("brand", "").lower() or item.get("source", "").lower()
-        if brand_lower not in item_brand:
+        item_brand = search_engine._item_brand(item)
+        if item_brand != brand_lower or not search_engine._is_supported_item(item):
             continue
             
         # Collection / Category check
@@ -943,9 +1001,10 @@ def browse_collection(brand: str, collection: str = None):
                 # Only fall back to raw text when the parser could not assign a category.
                 results.append(item)
             
-        if len(results) >= 500: break # Show more for browsing
+        if len(results) >= 500:
+            break
     
-    return {"results": results}
+    return {"results": search_engine.prepare_items_for_display(results)}
 
 
 if __name__ == "__main__":
@@ -963,3 +1022,4 @@ if __name__ == "__main__":
         except:
             pass
         sys.exit(1)
+

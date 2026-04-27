@@ -1,5 +1,9 @@
 export function registerServiceWorker() {
-  if (process.env.NODE_ENV !== 'production' || !('serviceWorker' in navigator)) {
+  if (
+    process.env.NODE_ENV !== 'production'
+    || (typeof window !== 'undefined' && window.desktopApp && window.desktopApp.isDesktop)
+    || !('serviceWorker' in navigator)
+  ) {
     return;
   }
 

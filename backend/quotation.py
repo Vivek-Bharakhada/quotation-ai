@@ -1,4 +1,5 @@
 import os
+import sys
 import urllib.request
 from datetime import datetime
 from html import escape
@@ -6,6 +7,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
+
+from app_paths import resolve_data_dir
 
 # ── Company constants ──────────────────────────────────────────────────────────
 COMPANY_NAME     = "Shreeji Ceramica"
@@ -44,15 +47,92 @@ def _line_taxable_total(item, discount_percent=0.0):
     global_discount_amount = line_after_item_discount * (discount_percent / 100.0)
     return line_after_item_discount - global_discount_amount
 
+
+def _resolve_case_insensitive_path(root_dir, relative_path):
+    current = os.path.abspath(root_dir)
+    parts = [part for part in str(relative_path or "").replace("\\", "/").split("/") if part and part != "."]
+
+    for part in parts:
+        direct_path = os.path.join(current, part)
+        if os.path.exists(direct_path):
+            current = direct_path
+            continue
+
+        try:
+            entries = {entry.lower(): entry for entry in os.listdir(current)}
+        except OSError:
+            return ""
+
+        matched_name = entries.get(part.lower())
+        if not matched_name:
+            return ""
+        current = os.path.join(current, matched_name)
+
+    return current if os.path.exists(current) else ""
+
+
+def _find_image_by_basename(root_dir, filename):
+    target_name = str(filename or "").strip().lower()
+    if not target_name:
+        return ""
+
+    for current_root, _, files in os.walk(root_dir):
+        for current_file in files:
+            if current_file.lower() == target_name:
+                return os.path.join(current_root, current_file)
+    return ""
+
+
 def _resolve_item_image(base_dir, item):
-    img_p = item.get("image")
-    if img_p and str(img_p).startswith("/static/images/"):
-        real_p = os.path.join(base_dir, str(img_p).lstrip("/"))
-        if os.path.exists(real_p):
+    img_p = str(item.get("image") or "").strip()
+    if not img_p:
+        return ""
+
+    is_frozen = getattr(sys, "frozen", False)
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else base_dir
+    data_dir = resolve_data_dir(is_frozen, exe_dir)
+
+    candidate_paths = []
+    if img_p.startswith("/static/images/"):
+        rel = img_p.replace("/static/images/", "", 1)
+        image_roots = [
+            os.path.join(data_dir, "static", "images"),
+            os.path.join(base_dir, "static", "images"),
+            os.path.join(exe_dir, "static", "images"),
+        ]
+
+        for root_dir in image_roots:
+            resolved = _resolve_case_insensitive_path(root_dir, rel)
+            if resolved:
+                candidate_paths.append(resolved)
+
+        if "/" not in rel.replace("\\", "/"):
+            basename_match = os.path.basename(rel)
+            for root_dir in image_roots:
+                recursive_match = _find_image_by_basename(root_dir, basename_match)
+                if recursive_match:
+                    candidate_paths.append(recursive_match)
+    elif os.path.isabs(img_p):
+        candidate_paths.append(img_p)
+    elif img_p.startswith("http://") or img_p.startswith("https://"):
+        cache_dir = os.path.join(data_dir, "static", "images", "_quote_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        filename = os.path.basename(img_p.split("?", 1)[0]) or f"quote_image_{int(datetime.now().timestamp())}.jpg"
+        cached_path = os.path.join(cache_dir, filename)
+        if not os.path.exists(cached_path):
+            try:
+                urllib.request.urlretrieve(img_p, cached_path)
+            except Exception:
+                cached_path = ""
+        if cached_path:
+            candidate_paths.append(cached_path)
+
+    for real_p in candidate_paths:
+        if real_p and os.path.exists(real_p):
             try:
                 return RLImage(real_p, width=42, height=42, kind='proportional')
             except Exception:
-                return ""
+                continue
     return ""
 
 def _build_item_description(item, styles):
@@ -131,7 +211,7 @@ def generate_quote(data):
 
     # ── 1. Header Branding section ──────────────────────────────────────────
     if show_bg_logo:
-        # A. Brand Logos (Aquant, Kohler, Plumber)
+        # A. Brand Logos (Aquant, Kohler)
         def _brand_img(b_name, filename, w=48, h=25):
             p = os.path.join(base_dir, "static", filename)
             # Fallback if specific brand files missing/broken
@@ -139,8 +219,6 @@ def generate_quote(data):
                  p = os.path.join(base_dir, "static", "gen_aquant.png")
             if b_name == 'KOHLER' and (not os.path.exists(p) or os.path.getsize(p) < 100):
                  p = os.path.join(base_dir, "static", "gen_kohler.png")
-            if b_name == 'PLUMBER' and (not os.path.exists(p) or os.path.getsize(p) < 100):
-                 p = os.path.join(base_dir, "static", "gen_plumber.png")
             
             if os.path.exists(p) and os.path.getsize(p) > 500:
                 try: return RLImage(p, width=w, height=h, kind='proportional')
@@ -151,9 +229,8 @@ def generate_quote(data):
 
         aquant_img  = _brand_img('AQUANT', "brand_aquant.png")
         kohler_img  = _brand_img('KOHLER', "brand_kohler.png")
-        plumber_img = _brand_img('PLUMBER', "brand_plumber.png")
         
-        brands_row = Table([[aquant_img, kohler_img, plumber_img]], colWidths=[55, 55, 55])
+        brands_row = Table([[aquant_img, kohler_img]], colWidths=[60, 60])
         brands_row.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
 
         # B. Showroom Info (Center-Right)

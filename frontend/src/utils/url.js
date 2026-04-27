@@ -1,6 +1,8 @@
 import BASE from '../api';
 
 const ABSOLUTE_PROTOCOL = /^(https?:|data:|blob:)/i;
+const STATIC_IMAGE_PATH = /\/static\/images\//i;
+const CACHE_BUSTER = 'v=20260424';
 
 export function isAbsoluteUrl(value) {
   return ABSOLUTE_PROTOCOL.test(String(value || '').trim());
@@ -24,8 +26,10 @@ export function resolveAssetUrl(value) {
   }
 
   if (raw.startsWith('/')) {
-    return `${normalizedBase}${raw}`;
+    const resolved = `${normalizedBase}${raw}`;
+    return STATIC_IMAGE_PATH.test(raw) ? `${resolved}${resolved.includes('?') ? '&' : '?'}${CACHE_BUSTER}` : resolved;
   }
 
-  return `${normalizedBase}/${raw}`;
+  const resolved = `${normalizedBase}/${raw}`;
+  return STATIC_IMAGE_PATH.test(raw) ? `${resolved}${resolved.includes('?') ? '&' : '?'}${CACHE_BUSTER}` : resolved;
 }

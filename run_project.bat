@@ -5,7 +5,7 @@ set "ROOT=%~dp0"
 
 echo Updating search index with new products...
 cd /d "%ROOT%backend"
-python add_missing_showers.py
+REM python add_missing_showers.py
 
 echo.
 echo Starting Backend Server with auto-reload...

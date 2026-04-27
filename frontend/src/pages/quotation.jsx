@@ -42,18 +42,79 @@ const createBlankItem = () => ({
   size: '',
 });
 
+const PLACEHOLDER_IMAGE = '/static/images/Kohler/Image_Not_Found.png';
+const BRAND_FALLBACK_IMAGES = {
+  Kohler: '/kohler_cover.jpg',
+  Aquant: '/hero.png',
+};
+const FORCE_IMAGE_BY_CODE = new Map([
+  ['K-24740IN-7', PLACEHOLDER_IMAGE],
+  ['K-22786IN-4-BV', '/static/images/Kohler/K-22786IN-4-BV.pdf.png'],
+  ['K-21970IN-4ND-BV', '/static/images/Kohler/K-21970IN-4ND-BV.pdf.png'],
+  ['K-22792IN-4FP-BV', '/static/images/Kohler/K-22792IN-4FP-BV.pdf.png'],
+  ['K-21969IN-4ND-BV', '/static/images/Kohler/K-21969IN-4ND-BV.pdf.png'],
+  ['K-704613IN-CP', '/static/images/Kohler/K-704613IN-CP.png'],
+]);
+
+const isPlaceholderImage = (value) =>
+  String(value || '').includes('Image_Not_Found') || String(value || '').includes('Image not Found');
+
+const extractLeadingCode = (value = '') => {
+  const text = String(value || '').trim().toUpperCase();
+  const match = text.match(/([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
+  return match ? match[1] : text;
+};
+
+const getItemCode = (item = {}) =>
+  extractLeadingCode(item?.sku || item?.name || item?.text || item?.raw_item?.search_code || '');
+
+const normalizeItemImage = (item = {}) => {
+  const code = getItemCode(item);
+  const forcedImage = FORCE_IMAGE_BY_CODE.get(code);
+  if (forcedImage) {
+    return forcedImage;
+  }
+
+  const primary = item.image || '';
+  const secondary = item.raw_item?.images?.[0] || item.image || '';
+
+  if (primary && !isPlaceholderImage(primary)) {
+    return primary;
+  }
+  if (secondary && !isPlaceholderImage(secondary)) {
+    return secondary;
+  }
+  const brand = String(item.brand || item.raw_item?.brand || '').trim();
+  return primary || secondary || BRAND_FALLBACK_IMAGES[brand] || null;
+};
+
+const sanitizeItem = (item = {}) => {
+  const image = normalizeItemImage(item);
+  return {
+    ...item,
+    image,
+    raw_item: item.raw_item
+      ? {
+          ...item.raw_item,
+          images: image ? [image] : [],
+        }
+      : item.raw_item,
+  };
+};
+
 const mapCartToItems = (cart = []) =>
   cart && cart.length > 0
-    ? cart.map((item) => ({
+    ? cart.map((item) => sanitizeItem({
         name: item.name,
         price: item.price || '0',
         quantity: 1,
         discount: 0,
-        image: item.image || null,
+        image: normalizeItemImage(item),
         room: '',
         rawText: item.rawText || item.text || '',
         sku: item.sku || '',
         size: item.size || '',
+        raw_item: item.raw_item || item,
       }))
     : [createBlankItem()];
 
@@ -380,7 +441,7 @@ export default function Quotation({ cart }) {
         !previousItems[0].price &&
         !previousItems[0].rawText;
 
-      return isBlankDraft ? mapCartToItems(cart) : previousItems;
+      return isBlankDraft ? mapCartToItems(cart) : previousItems.map(sanitizeItem);
     });
   }, [cart]);
 
@@ -410,7 +471,7 @@ export default function Quotation({ cart }) {
         gst: data.gst || '',
         address: data.address || '',
       });
-      setItems(data.items && data.items.length > 0 ? data.items : [createBlankItem()]);
+      setItems(data.items && data.items.length > 0 ? data.items.map(sanitizeItem) : [createBlankItem()]);
       setDiscountPercent(data.discount_percent || 0);
       setGstRate(data.gst_rate || 18);
       setShowGstInput(Boolean(data.gst));
@@ -447,8 +508,8 @@ export default function Quotation({ cart }) {
     setItems((previousItems) =>
       previousItems.map((item, itemIndex) =>
         itemIndex === index
-          ? { ...item, [fieldName]: fieldValue }
-          : item
+          ? sanitizeItem({ ...item, [fieldName]: fieldValue })
+          : sanitizeItem(item)
       )
     );
   };
@@ -458,7 +519,7 @@ export default function Quotation({ cart }) {
   };
 
   const addItem = () => {
-    setItems([...items, createBlankItem()]);
+    setItems([...items.map(sanitizeItem), createBlankItem()]);
   };
 
   const removeItem = (index) => {
@@ -944,8 +1005,8 @@ export default function Quotation({ cart }) {
             <article key={index} className="qt-item-card">
               <div className="qt-item-grid">
                 <div className="qt-thumb">
-                  {item.image ? (
-                    <img src={resolveAssetUrl(item.image)} alt="thumb" />
+                  {normalizeItemImage(item) ? (
+                    <img src={resolveAssetUrl(normalizeItemImage(item))} alt="thumb" />
                   ) : (
                     <div className="qt-no-thumb">NO IMG</div>
                   )}

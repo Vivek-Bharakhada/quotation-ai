@@ -5,7 +5,7 @@ const FEATURE_LIST = [
   {
     title: 'Unified Catalog Brain',
     description:
-      'Keep Aquant, Kohler, and Plumber price books searchable in one place with smart indexing and lightning-quick filters.',
+      'Keep Aquant and Kohler price books searchable in one place with smart indexing and lightning-quick filters.',
   },
   {
     title: 'Quotation Generator',
@@ -43,7 +43,7 @@ const TIMELINE = [
 ];
 
 const NUMBERS = [
-  { value: '3+', label: 'Brand catalogs supported' },
+  { value: '2', label: 'Curated brand catalogs' },
   { value: '60s', label: 'Average quote preparation' },
   { value: '100%', label: 'Browser and app ready' },
 ];

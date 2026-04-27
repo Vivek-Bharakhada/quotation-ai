@@ -4,6 +4,7 @@ import './dashboard.css';
 
 import BASE from '../api';
 import { resolveAssetUrl } from '../utils/url';
+import { sanitizeDisplayText } from '../utils/text';
 
 const publicAsset = (assetPath) => {
   const publicBase = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
@@ -89,49 +90,31 @@ const KOHLER_INDEX = [
   { title: 'Cleaning Solutions' },
 ];
 
-const PLUMBER_INDEX = [
-  { title: 'Dune' },
-  { title: 'Aura' },
-  { title: 'Chorus-F' },
-  { title: 'Prive' },
-  { title: 'Cross' },
-  { title: 'Poem' },
-  { title: 'Rover' },
-  { title: 'Showers' },
-  { title: 'Accessories' },
-  { title: 'Thermostatic Mixers' },
-  { title: 'Universal Items' },
-  { title: 'Faucets' },
-];
-
 const BRAND_META = {
   Aquant: {
     subtitle: 'Contemporary Bathrooms',
     title: 'Price List 2026',
-    heroImage:
-      'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=2000',
+    heroImage: publicAsset('/hero.png'),
   },
   Kohler: {
     subtitle: 'The Bold Look of Kohler',
     title: 'Price Book 2026',
     heroImage: publicAsset('/kohler_cover.jpg'),
   },
-  Plumber: {
-    subtitle: 'Plumber Bathware',
-    title: 'Luxury Collection 2026',
-    heroImage: resolveAssetUrl('/static/images/Plumber_Bathware_1b795ac4cb_p0_i0.jpg'),
-  },
 };
 
-function toPriceLabel(rawPrice, brand) {
+const PRODUCT_FALLBACK_IMAGES = {
+  Kohler: '/kohler_cover.jpg',
+  Aquant: '/hero.png',
+};
+
+function toPriceLabel(rawPrice) {
   const parsed = Number(String(rawPrice ?? '').replace(/,/g, ''));
-  const isPlumber = String(brand || '').toLowerCase() === 'plumber';
-  const prefix = isPlumber ? 'MRP Per Unit' : 'MRP';
 
   if (Number.isFinite(parsed) && parsed > 0) {
-    return `${prefix} ${parsed.toLocaleString()}`;
+    return `MRP ${parsed.toLocaleString()}`;
   }
-  return `${prefix} on request`;
+  return 'MRP on request';
 }
 
 function extractCodePrefix(value) {
@@ -144,10 +127,12 @@ function buildSummary(text, name) {
     return 'Premium sanitaryware collection';
   }
 
-  const nameLower = String(name || '').trim().toLowerCase();
+  const cleanedText = sanitizeDisplayText(text);
+  const cleanedName = sanitizeDisplayText(name);
+  const nameLower = String(cleanedName || '').trim().toLowerCase();
   const codePrefix = extractCodePrefix(name);
   const seen = new Set();
-  const lines = text
+  const lines = cleanedText
     .split('\n')
     .map((line) => line.trim())
     .filter(
@@ -180,6 +165,25 @@ function buildSummary(text, name) {
   return lines.slice(0, 3).join(' | ');
 }
 
+function getDisplayName(item) {
+  const candidate = item?.display_name || item?.name || item?.text?.split('\n')[0] || 'Unnamed Product';
+  const cleanedCandidate = sanitizeDisplayText(candidate);
+  if (!cleanedCandidate) {
+    return 'Unnamed Product';
+  }
+
+  const textHead = sanitizeDisplayText(item?.text || '').split('\n')[0].trim();
+  if (cleanedCandidate && textHead && cleanedCandidate === textHead) {
+    return cleanedCandidate;
+  }
+
+  if (cleanedCandidate && extractCodePrefix(cleanedCandidate) && textHead && !extractCodePrefix(textHead)) {
+    return textHead;
+  }
+
+  return cleanedCandidate;
+}
+
 export default function Dashboard({ setCurrentPage, cart, setCart }) {
   const [activeBrand, setActiveBrand] = useState('Aquant');
   const [viewingCategory, setViewingCategory] = useState(null);
@@ -198,7 +202,6 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
     () => ({
       Aquant: AQUANT_INDEX,
       Kohler: KOHLER_INDEX,
-      Plumber: PLUMBER_INDEX,
     }),
     []
   );
@@ -305,17 +308,17 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
     }
 
     const baseName = item.name || item.text?.split('\n')[0] || 'Unknown Product';
-    const finalName = currentVariant ? `${baseName} (${currentVariant})` : baseName;
+    const finalName = currentVariant ? `${sanitizeDisplayText(baseName)} (${sanitizeDisplayText(currentVariant)})` : sanitizeDisplayText(baseName);
     const finalPrice = (item.variant_prices && currentVariant && item.variant_prices[currentVariant]) || item.price || '0';
 
     const newItem = {
       id,
       name: finalName,
       price: finalPrice,
-      rawText: item.text || '',
+      rawText: sanitizeDisplayText(item.text || ''),
       image: item.images && item.images.length > 0 ? item.images[0] : null,
       brand: brand,
-      finish: currentVariant
+      finish: sanitizeDisplayText(currentVariant)
     };
 
     setCart((prev) => [...prev, newItem]);
@@ -425,6 +428,9 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                       const imageCandidates = (item.images || []).filter(Boolean).map(resolveAssetUrl);
                       const imageSrc = imageCandidates.find((src) => !failedImages[src]) || '';
                       const hasImage = imageSrc && !failedImages[imageSrc];
+                      const brandFallback = resolveAssetUrl(PRODUCT_FALLBACK_IMAGES[viewingCategory.brand] || '/hero.png');
+                      const fallbackFailed = failedImages[brandFallback];
+                      const showFallbackImage = !hasImage && brandFallback && !fallbackFailed;
                       const cardKey = item.search_code || item.base_code || item.name || item.text || idx;
 
                       return (
@@ -432,13 +438,28 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                           <div className="db-product-image-wrap">
                             {hasImage ? (
                               <img src={imageSrc} alt={item.name || 'Product'} loading="lazy" onError={() => markImageFailed(imageSrc)} />
+                            ) : showFallbackImage ? (
+                              <img
+                                src={brandFallback}
+                                alt={item.name || 'Product'}
+                                loading="lazy"
+                                onError={() => markImageFailed(brandFallback)}
+                              />
                             ) : (
-                              <div className="db-no-image">IMAGE NOT FOUND</div>
+                              <div
+                                aria-hidden="true"
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  borderRadius: '14px',
+                                  background: 'linear-gradient(135deg, rgba(95, 99, 104, 0.12), rgba(95, 99, 104, 0.04))',
+                                }}
+                              />
                             )}
                           </div>
 
                         <div className="db-product-body">
-                          <h3>{item.name || 'Unnamed Product'}</h3>
+                          <h3>{getDisplayName(item)}</h3>
                           <p>{buildSummary(item.text, item.name)}</p>
 
                           {item.variant_prices && Object.keys(item.variant_prices).length > 0 && (
@@ -449,7 +470,7 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
                                 onChange={(e) => setSelectedVariants(prev => ({...prev, [item.name]: e.target.value}))}
                               >
                                 {Object.keys(item.variant_prices).map(v => (
-                                  <option key={v} value={v}>{v} - ₹{parseInt(item.variant_prices[v], 10).toLocaleString('en-IN')}</option>
+                                  <option key={v} value={v}>{sanitizeDisplayText(v)} - Rs {parseInt(item.variant_prices[v], 10).toLocaleString('en-IN')}</option>
                                 ))}
                               </select>
                             </div>
@@ -457,8 +478,8 @@ export default function Dashboard({ setCurrentPage, cart, setCart }) {
 
                           <div className="db-product-footer">
                             <div className="db-product-price-col">
-                              <span>{toPriceLabel(displayPrice, viewingCategory?.brand || activeBrand)}</span>
-                              {currentVariant && <span className="db-variant-tag">{currentVariant}</span>}
+                              <span>{toPriceLabel(displayPrice)}</span>
+                              {currentVariant && <span className="db-variant-tag">{sanitizeDisplayText(currentVariant)}</span>}
                             </div>
                             <button
                               className={`db-card-btn ${alreadyAdded ? 'added' : ''}`}

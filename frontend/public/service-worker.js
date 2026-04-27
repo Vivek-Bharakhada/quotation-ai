@@ -1,5 +1,5 @@
-const APP_CACHE = 'quotation-ai-app-v1';
-const RUNTIME_CACHE = 'quotation-ai-runtime-v1';
+const APP_CACHE = 'quotation-ai-app-v2';
+const RUNTIME_CACHE = 'quotation-ai-runtime-v2';
 const APP_SHELL = [
   '/',
   '/index.html',

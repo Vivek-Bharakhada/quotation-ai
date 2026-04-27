@@ -1,8 +1,11 @@
-import numpy as np
-import re
-import os
+import copy
 import json
+import os
+import re
 import threading
+import unicodedata
+
+import numpy as np
 
 import cloud_storage
 from app_paths import resolve_data_dir
@@ -12,13 +15,22 @@ is_frozen = getattr(sys, 'frozen', False)
 EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.path.dirname(os.path.abspath(__file__))
 _MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
 
-BUNDLED_DIR = EXE_DIR
+BUNDLED_DIR = _MEIPASS
+if is_frozen:
+    # Handle PyInstaller 6+ --contents-directory layout
+    possible_internal = os.path.join(_MEIPASS, "_internal")
+    if os.path.isdir(possible_internal):
+        BUNDLED_DIR = possible_internal
 DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
 
 # Priority path for search index
 INDEX_FILE_PERSISTENT = os.path.join(DATA_DIR, "search_index_v2.json")
 INDEX_FILE_BUNDLED = os.path.join(BUNDLED_DIR, "search_index_v2.json")
 INDEX_FILE = INDEX_FILE_PERSISTENT
+
+# Persistent cache for image paths to speed up startup
+IMAGE_CACHE_FILE = os.path.join(DATA_DIR, "image_path_cache.json")
+IMAGE_CACHE_FILE_BUNDLED = os.path.join(BUNDLED_DIR, "image_path_cache.json")
 
 # Lazy model loading - loads in background only when needed
 AI_AVAILABLE = False
@@ -76,16 +88,34 @@ catalog_summary_cache = None # Saved dashboard index
 item_code_meta_cache = {}
 _index_cache_signature = None
 _image_path_cache = None
+CACHE_SCHEMA_VERSION = 2
+HARD_PLACEHOLDER_CODES = {
+    "K-24740IN-7", "K-24740IN-K4", "K-17663IN-0", "K-82958",
+    "K-1042534", "K-1060831", "K-1063956", "K-1286731",
+}
+HARD_PLACEHOLDER_IMAGE = "/static/images/Kohler/Image_Not_Found.png"
+FORCE_PDF_IMAGE_CODES = {
+    "K-22786IN-4-BV",
+    "K-21970IN-4ND-BV",
+    "K-22792IN-4FP-BV",
+    "K-21969IN-4ND-BV",
+}
 
 
 # INDEX_FILE is now dynamically determined in load_index
 SEARCH_INDEX_OBJECT_PATH = os.getenv("SUPABASE_SEARCH_INDEX_PATH", "search/search_index_v2.json")
 
 STATIC_IMAGES_DIR = os.path.join(BUNDLED_DIR, "static", "images")
+PERSISTENT_IMAGES_DIR = os.path.join(DATA_DIR, "static", "images")
+IMAGE_ROOTS = []
+for _root in (PERSISTENT_IMAGES_DIR, STATIC_IMAGES_DIR, os.path.join(BUNDLED_DIR, "static", "images")):
+    if _root and _root not in IMAGE_ROOTS:
+        IMAGE_ROOTS.append(_root)
 
 # Minimum file size (bytes) for a valid product image.
 # Images below this are icons, colour swatches, or small decorative elements from the PDF.
 _MIN_PRODUCT_IMAGE_SIZE = 8000
+SUPPORTED_BRANDS = {"aquant", "kohler"}
 
 _LEADING_CODE_WITH_VARIANT_RE = re.compile(
     r'^\s*((?:[A-Z]{1,4}-\d[A-Z0-9\+\-\ ]*|\d[A-Z0-9\+\-\ ]*))(?:\s+([A-Z0-9+]{1,12}))?',
@@ -159,18 +189,32 @@ _KNOWN_FINISH_CODES = tuple(sorted(_KNOWN_FINISH_LABELS.keys(), key=len, reverse
 
 
 def _image_file_size(image_path: str) -> int:
-    """Return the file size of a /static/images/… path, or -1 if missing."""
-    if not image_path:
-        return -1
-    rel = str(image_path).lstrip("/")
-    rel = rel.replace("static/images/", "", 1).replace("static/", "", 1)
-    full = os.path.abspath(os.path.normpath(os.path.join(STATIC_IMAGES_DIR, rel)))
-    if not full.startswith(os.path.abspath(STATIC_IMAGES_DIR)):
+    """Return the file size of a /static/images/... path, or -1 if missing."""
+    full = _resolve_local_image_path(image_path)
+    if not full:
         return -1
     try:
         return os.path.getsize(full)
     except OSError:
         return -1
+
+
+def _resolve_local_image_path(image_path: str) -> str:
+    if not image_path:
+        return ""
+
+    rel = str(image_path).lstrip("/")
+    rel = rel.replace("static/images/", "", 1)
+    rel = rel.replace("static/", "", 1)
+
+    for root in IMAGE_ROOTS:
+        full = os.path.abspath(os.path.normpath(os.path.join(root, rel)))
+        if not full.startswith(os.path.abspath(root)):
+            continue
+        if os.path.exists(full):
+            return full
+
+    return ""
 
 
 def _is_cover_page_image(image_path: str) -> bool:
@@ -249,16 +293,130 @@ def _clean_display_text(text: str) -> str:
     """Normalize common mojibake/bullet artifacts for UI display."""
     if not text:
         return ""
-    s = str(text)
-    # Common UTF-8 mojibake sequences from PDF bullets/dashes.
-    for bad in ("â€¢", "â€“", "â€”", "â€", "â–=", "â–"):
-        s = s.replace(bad, "•")
+    
+    # Try fixing common double-encoding issues first
+    s = unicodedata.normalize("NFKC", _try_fix_mojibake(str(text)))
+    
+    # Comprehensive replacement map for common encoding artifacts
+    replacements = {
+        "â€¢": "-", "â€“": "-", "â€”": "-", "â€™": "'", "â€œ": '"', "â€?": '"',
+        "Ã¢-žÂ¢": "™", "Ã¢â‚¬â„¢": "'", "Ã¢â‚¬": "-", "â–": "-", "â–=": "-",
+        "â\x9e¢": "™", "â\x84¢": "™", "\u2022": "-", "\u2122": " TM ",
+        "\u20b9": "Rs ", "â‚¹": "Rs ", "Ã‚": "", "Â": " ",
+        "\u00a0": " ", "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+        "\u2013": "-", "\u2014": "-", "â€“": "-", "â€”": "-",
+    }
+    for bad, good in replacements.items():
+        s = s.replace(bad, good)
+        
+    # Catch any remaining common double-encoded artifacts like Ã¢ or Ã
+    s = re.sub(r'Ã[¢\-\sžÂ]+[¢Â]?', '™', s)
+    s = s.replace("Ã", "")
+    s = s.replace("â", "")
+        
     # Normalize bullet-like glyphs to a simple dash for cleaner UI.
-    for bullet in ("•", "●", "▪", "◦", "◾", "■"):
+    for bullet in ("•", "●", "▪", "◦", "◾", "■", "•"):
         s = s.replace(bullet, "-")
-    # Collapse extra spaces introduced by replacements.
+        
+    # Collapse extra spaces
     s = re.sub(r"\s{2,}", " ", s)
     return s.strip()
+
+
+def _try_fix_mojibake(value: str) -> str:
+    text = str(value or "")
+    if not any(ch in text for ch in ("Ã", "â", "Â")):
+        return text
+    try:
+        repaired = text.encode("latin-1", errors="ignore").decode("utf-8", errors="ignore")
+        if repaired:
+            return repaired
+    except Exception:
+        pass
+    return text
+
+
+def _is_supported_brand_name(brand_name: str) -> bool:
+    return str(brand_name or "").strip().lower() in SUPPORTED_BRANDS
+
+
+def _is_supported_item(item) -> bool:
+    return _is_supported_brand_name(_item_brand(item))
+
+
+def _image_brand_hint(image_path: str) -> str:
+    rel_path = str(image_path or "").replace("\\", "/").strip().lstrip("/")
+    if rel_path.lower().startswith("static/images/"):
+        rel_path = rel_path[len("static/images/"):]
+    first_segment = rel_path.split("/", 1)[0].strip().lower()
+    return first_segment if first_segment in SUPPORTED_BRANDS else ""
+
+
+def _clean_variant_prices(variant_prices):
+    if not isinstance(variant_prices, dict):
+        return variant_prices
+    cleaned = {}
+    for key, value in variant_prices.items():
+        cleaned[_clean_display_text(key)] = value
+    return cleaned
+
+
+def prepare_item_for_display(item):
+    display_item = copy.deepcopy(item)
+    raw_name = _clean_display_text(display_item.get("name"))
+    raw_text = _clean_display_text(display_item.get("text"))
+    display_name = raw_name
+    display_code = display_item.get("search_code") or display_item.get("full_code") or display_item.get("base_code") or ""
+    if raw_name and _looks_like_model_code(raw_name) and raw_text:
+        text_head = raw_text.splitlines()[0].strip()
+        if text_head and not _looks_like_model_code(text_head):
+            display_name = text_head
+    elif not raw_name and raw_text:
+        display_name = raw_text.splitlines()[0].strip()
+
+    for key in (
+        "name",
+        "text",
+        "category",
+        "brand",
+        "source",
+        "sku",
+        "size",
+        "search_code",
+        "base_code",
+        "full_code",
+        "finish_label",
+    ):
+        if key in display_item:
+            display_item[key] = _clean_display_text(display_item.get(key))
+
+    if "variant_prices" in display_item:
+        display_item["variant_prices"] = _clean_variant_prices(display_item.get("variant_prices"))
+
+    best_image = _best_item_image(item)
+    if best_image:
+        display_item["images"] = [best_image]
+    elif display_item.get("images"):
+        display_item["images"] = [img for img in display_item.get("images", []) if img]
+
+    # Normalize a few Aquant ceiling-shower variants whose OCR'd finish labels
+    # can include an extra color that should not be shown in the UI.
+    code_blob = f"{raw_name} {raw_text} {display_code}".lower()
+    if any(token in code_blob for token in ("5104 gg", "5105 gg", "5106 gg", "5107 gg")):
+        display_item["finish_label"] = "Graphite Grey"
+    elif any(token in code_blob for token in ("5104 bg", "5105 bg", "5106 bg", "5107 bg")):
+        display_item["finish_label"] = "Brushed Gold"
+
+    display_item["display_name"] = _clean_display_text(display_name)
+    display_item["display_code"] = _clean_display_text(display_code)
+    if raw_text:
+        display_item["display_text"] = raw_text
+
+    return display_item
+
+
+def prepare_items_for_display(items):
+    return [prepare_item_for_display(item) for item in items if item]
 
 def _parse_code_metadata(raw_text: str):
     text = str(raw_text or "").strip()
@@ -368,8 +526,13 @@ def _get_item_code_metadata(item):
 
 
 def _enrich_items_for_search(items):
+    needed = False
     for item in items:
-        _get_item_code_metadata(item)
+        # Optimization: only enrich if key fields are missing
+        if "base_compact" not in item:
+            _get_item_code_metadata(item)
+            needed = True
+    return needed
 
 
 def _item_quality_bonus(item) -> float:
@@ -410,6 +573,8 @@ def _normalize_item_images(items):
 
 def save_index():
     global stored_items, keyword_index
+    _sanitize_item_images(stored_items)
+    _normalize_item_images(stored_items)
     data = {
         "stored_items": stored_items,
         "keyword_index": keyword_index
@@ -417,6 +582,18 @@ def save_index():
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f)
     print(f"Index saved to {INDEX_FILE}")
+
+    # Synchronously save image cache too
+    if _image_path_cache:
+        try:
+            payload = {"__schema__": CACHE_SCHEMA_VERSION, "paths": _image_path_cache}
+            with open(IMAGE_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            if IMAGE_CACHE_FILE_BUNDLED and IMAGE_CACHE_FILE_BUNDLED != IMAGE_CACHE_FILE:
+                with open(IMAGE_CACHE_FILE_BUNDLED, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+        except Exception as e:
+            print(f"Warning: failed to save image cache: {e}")
 
     if cloud_storage.is_enabled():
         try:
@@ -463,8 +640,13 @@ def load_index(force: bool = False):
             print(f"Index loaded: {len(stored_items)} items from {index_file}")
             _index_cache_signature = signature
 
+            if not stored_items:
+                print("Loaded index is empty; treating it as missing so the catalog can rebuild.")
+                return False
+
             item_code_meta_cache = {}
             _enrich_items_for_search(stored_items)
+            search_cache.clear()
 
             # Strip bad/wrong product images (cover logos, tiny icons, missing files)
             _sanitize_item_images(stored_items)
@@ -514,7 +696,11 @@ def reset_index():
     catalog_summary_cache = None
     item_code_meta_cache = {}
     if os.path.exists(INDEX_FILE):
-        os.remove(INDEX_FILE)
+        try:
+            os.remove(INDEX_FILE)
+        except OSError as e:
+            # The file may be temporarily locked on Windows; save_index() will overwrite it.
+            print(f"Warning: could not remove old index file, will overwrite on save: {e}")
     if cloud_storage.is_enabled():
         try:
             cloud_storage.delete_object(cloud_storage.SYSTEM_BUCKET, SEARCH_INDEX_OBJECT_PATH)
@@ -535,26 +721,78 @@ def _code_like(text: str) -> bool:
 def _compact_alnum(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', '', text.lower())
 
+def _looks_like_model_code(text: str) -> bool:
+    """True if the string contains a digit and likely represents a product code."""
+    if not text: return False
+    return bool(re.search(r'\d', text))
+
 def _build_image_path_cache():
     global _image_path_cache
     if _image_path_cache is not None:
         return _image_path_cache
 
+    # 1. Try loading from persistent file first
+    for path in [IMAGE_CACHE_FILE, IMAGE_CACHE_FILE_BUNDLED]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                    if isinstance(payload, dict) and payload.get("__schema__") == CACHE_SCHEMA_VERSION:
+                        cached_paths = payload.get("paths", {})
+                        if isinstance(cached_paths, dict):
+                            _image_path_cache = cached_paths
+                            print(f"Loaded image path cache from {path}: {len(_image_path_cache)} entries")
+                            return _image_path_cache
+                    print(f"Ignoring legacy image cache at {path}; rebuilding for brand-folder support.")
+            except Exception as e:
+                print(f"Warning: image cache file error at {path}: {e}")
+
+    # 2. Walk directory if cache missing or failed
     cache = {}
-    if os.path.isdir(STATIC_IMAGES_DIR):
-        for root, _, files in os.walk(STATIC_IMAGES_DIR):
-            for filename in files:
-                stem = os.path.splitext(filename)[0]
-                compact = _compact_alnum(stem)
-                if not compact:
-                    continue
-                rel_dir = os.path.relpath(root, STATIC_IMAGES_DIR).replace("\\", "/")
-                rel_path = f"{filename}" if rel_dir == "." else f"{rel_dir}/{filename}"
-                public_path = f"/static/images/{rel_path}"
-                cache.setdefault(compact, []).append(public_path)
+    # Check both persistent and bundled image roots.
+    for img_root in IMAGE_ROOTS:
+        if os.path.isdir(img_root):
+            print(f"Walking image directory to build cache: {img_root}")
+            for root, _, files in os.walk(img_root):
+                for filename in files:
+                    stem = os.path.splitext(filename)[0]
+                    compact = _compact_alnum(stem)
+                    if not compact:
+                        continue
+                    rel_dir = os.path.relpath(root, img_root).replace("\\", "/")
+                    rel_path = f"{filename}" if rel_dir == "." else f"{rel_dir}/{filename}"
+                    public_path = f"/static/images/{rel_path}"
+                    cache.setdefault(compact, []).append(public_path)
 
     _image_path_cache = cache
+    # Save newly built cache
+    try:
+        with open(IMAGE_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"__schema__": CACHE_SCHEMA_VERSION, "paths": cache}, f)
+    except Exception:
+        pass
+        
     return cache
+
+
+def _pick_best_image_match(item, matches):
+    if not matches:
+        return None
+
+    item_brand = _item_brand(item)
+
+    def sort_key(path: str):
+        normalized = str(path or "").replace("\\", "/").lower()
+        brand_hint = _image_brand_hint(path)
+        brand_score = 10 if item_brand and brand_hint == item_brand else 1 if brand_hint else 0
+        cover_penalty = -5 if _is_cover_page_image(path) else 0
+        # Prefer brand-specific subfolders over root static folder
+        folder_boost = 5 if "/" in normalized and not normalized.startswith("manual/") else 0
+        manual_penalty = -1 if "/manual/" in normalized else 0
+        depth_penalty = -normalized.count("/")
+        return (brand_score, folder_boost, cover_penalty, manual_penalty, depth_penalty)
+
+    return max(matches, key=sort_key)
 
 
 def _best_item_image(item):
@@ -566,12 +804,16 @@ def _best_item_image(item):
         if value:
             candidate_codes.append(value)
 
-    # Preserve already attached images if they exist and resolve correctly.
-    for img_path in item.get("images") or []:
-        if not img_path:
-            continue
-        if _image_file_size(img_path) >= 0:
-            return img_path
+    # Check if any of our candidate codes are in the blacklist
+    for code in candidate_codes:
+        if code in HARD_PLACEHOLDER_CODES:
+            return None  # Never return placeholder image
+
+    for code in candidate_codes:
+        if code in FORCE_PDF_IMAGE_CODES:
+            forced = f"/static/images/Kohler/{code}.pdf.png"
+            if _image_file_size(forced) >= _MIN_PRODUCT_IMAGE_SIZE:
+                return forced
 
     image_cache = _build_image_path_cache()
     for code in candidate_codes:
@@ -580,10 +822,21 @@ def _best_item_image(item):
             continue
         matches = image_cache.get(compact_code)
         if matches:
-            return matches[0]
+            # Filter to only paths that actually exist on disk with valid size
+            valid_matches = [m for m in matches if _image_file_size(m) >= _MIN_PRODUCT_IMAGE_SIZE]
+            if not valid_matches:
+                continue
+            picked = _pick_best_image_match(item, valid_matches)
+            if picked:
+                return picked
 
-    images = item.get("images") or []
-    return images[0] if images else None
+    existing_matches = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
+    if existing_matches:
+        picked = _pick_best_image_match(item, existing_matches)
+        if picked:
+            return picked
+
+    return None  # Never return placeholder image
 
 
 def _special_family_override_items(query_code_meta, brand_lower: str):
@@ -600,6 +853,8 @@ def _special_family_override_items(query_code_meta, brand_lower: str):
     allowed_compacts = {"1333cm", "1333bm", "1333pp", "1333rb", "11333lm"}
     picked = []
     for item in stored_items:
+        if not _is_supported_item(item):
+            continue
         if brand_lower and brand_lower != "all" and _item_brand(item) != brand_lower:
             continue
         meta = _get_item_code_metadata(item)
@@ -775,7 +1030,9 @@ def add_to_index(_unused_embeddings, items):
         idx = start_idx + i
         text = item.get("text", "")
         name = item.get("name", "")
-        search_blob = f"{name}\n{text}".strip()
+        brand = item.get("brand", "")
+        source = item.get("source", "")
+        search_blob = f"{brand} {name}\n{text} {source}".strip()
         blob_lower = search_blob.lower()
 
         # Build list of unique tokens to index
@@ -859,6 +1116,8 @@ def search(query: str, smart: bool = False, brand: str = None):
         return []
 
     brand_lower = (brand or "").strip().lower()
+    if brand_lower and brand_lower != "all" and not _is_supported_brand_name(brand_lower):
+        return []
     is_all_brand = (not brand_lower) or (brand_lower == "all")
     cache_key = f"{query}|{smart}|{brand_lower}"
     if cache_key in search_cache:
@@ -954,7 +1213,9 @@ def search(query: str, smart: bool = False, brand: str = None):
         if not indices_list:
             return []
     else:
-        indices_list = [idx for idx in indices_list]
+        indices_list = [idx for idx in indices_list if _is_supported_item(stored_items[idx])]
+        if not indices_list:
+            return []
 
     # STRICT MODE: code/model queries should resolve to one most-accurate hit.
     if is_code_query:
@@ -1060,9 +1321,9 @@ def search(query: str, smart: bool = False, brand: str = None):
         if strict_scores:
             ranked_strict = sorted(strict_scores.items(), key=lambda x: (-x[1], x[0]))
 
-            # Find all products that share the exact top score
+            # Find all products that share a high enough score (allowing for variants with different quality bonuses)
             top_score = ranked_strict[0][1]
-            top_candidates = [stored_items[idx] for idx, score in ranked_strict if score == top_score]
+            top_candidates = [stored_items[idx] for idx, score in ranked_strict if score >= (top_score - 800)]
 
             # PERMANENT SOLUTION: We only want ONE accurate, primary product block for a given code.
             # If the parser split things weirdly, we remove duplicate variations of the EXACT same item name.
@@ -1164,7 +1425,7 @@ def search(query: str, smart: bool = False, brand: str = None):
             D, I = vector_index.search(q_emb, k)
             for dist, s_idx in zip(D[0], I[0]):
                 if s_idx >= 0 and dist > 0.4:
-                    if is_all_brand or brand_lower == _item_brand(stored_items[s_idx]):
+                    if (is_all_brand and _is_supported_item(stored_items[s_idx])) or brand_lower == _item_brand(stored_items[s_idx]):
                         scores[s_idx] = scores.get(s_idx, 0) + float(dist) * 150.0
         except Exception: pass
 
@@ -1180,6 +1441,8 @@ def search(query: str, smart: bool = False, brand: str = None):
             continue
             
         item = stored_items[idx]
+        if not _is_supported_item(item):
+            continue
         
         # If the user typed a specific code modifier like "OG" or "RG", drop results that clearly don't have it
         if is_code_query and len(query_words) > 1:
@@ -1218,7 +1481,7 @@ def search(query: str, smart: bool = False, brand: str = None):
             b = _item_brand(item) or "generic"
             buckets.setdefault(b, []).append(item)
 
-        ordered_brands = [b for b in ("aquant", "kohler", "plumber") if b in buckets]
+        ordered_brands = [b for b in ("aquant", "kohler") if b in buckets]
         ordered_brands.extend([b for b in buckets.keys() if b not in ordered_brands])
 
         mixed_items = []
@@ -1247,8 +1510,9 @@ def search(query: str, smart: bool = False, brand: str = None):
             if len(unique_res) >= max_results:
                 break
 
-    search_cache[cache_key] = unique_res
-    return unique_res
+    display_results = prepare_items_for_display(unique_res)
+    search_cache[cache_key] = display_results
+    return display_results
 
 
 def search_exact(query: str, smart: bool = False, brand: str = None):
@@ -1261,10 +1525,12 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
         return []
 
     brand_lower = (brand or "").strip().lower()
+    if brand_lower and brand_lower != "all" and not _is_supported_brand_name(brand_lower):
+        return []
     if brand_lower and brand_lower != "all":
         target_brands = [brand_lower]
     else:
-        target_brands = [b for b in ("aquant", "kohler", "plumber") if any(_item_brand(item) == b for item in stored_items)]
+        target_brands = [b for b in ("aquant", "kohler") if any(_item_brand(item) == b for item in stored_items)]
         if not target_brands:
             target_brands = [""]
 
@@ -1277,6 +1543,8 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
 
         if not query_is_code:
             for item in stored_items:
+                if not _is_supported_item(item):
+                    continue
                 item_brand = _item_brand(item)
                 if target_brand and item_brand != target_brand:
                     continue
@@ -1302,22 +1570,30 @@ def search_exact(query: str, smart: bool = False, brand: str = None):
         seen.add(dedupe_key)
         unique_res.append(item)
 
-    return unique_res
+    return prepare_items_for_display(unique_res)
 
 
 def _items_to_suggestion_payload(items, limit: int = 50):
     final_results = []
     seen = set()
     for item in items:
+        if not _is_supported_item(item):
+            continue
         name = str(item.get("name") or "").strip()
         if not name:
             continue
 
+        display_item = prepare_item_for_display(item)
         item_code_meta = _get_item_code_metadata(item)
         parts = name.split(" - ", 1)
-        code = parts[0].strip() or item_code_meta.get("full_code") or name
-        description = parts[1].strip() if len(parts) > 1 else ""
-        full_name = name
+        code = _clean_display_text(parts[0].strip() or item_code_meta.get("full_code") or name)
+        description = _clean_display_text(parts[1].strip()) if len(parts) > 1 else ""
+        if not item_code_meta.get("full_code") and not _extract_model_tokens(code):
+            # Catalog entries without a visible model code should still surface
+            # by their product name instead of showing an empty code bucket.
+            description = description or code
+            code = ""
+        full_name = _clean_display_text(name)
         dedupe_key = f"{str(item.get('brand') or '').lower()}|{full_name.lower()}"
         if dedupe_key in seen:
             continue
@@ -1327,9 +1603,11 @@ def _items_to_suggestion_payload(items, limit: int = 50):
             "text": code,
             "description": description,
             "full_name": full_name,
-            "brand": item.get("brand", "Aquant"),
+            "display_name": display_item.get("display_name") or full_name,
+            "display_code": display_item.get("display_code") or code,
+            "brand": _clean_display_text(item.get("brand", "Aquant")),
             "image": _best_item_image(item),
-            "raw_item": item,
+            "raw_item": display_item,
         })
         if len(final_results) >= limit:
             break
@@ -1362,6 +1640,39 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     if not stored_items:
         return []
 
+    q = query.strip().lower()
+    q_compact = _compact_alnum(q)
+    brand_lower = (brand or "").strip().lower()
+    if brand_lower and brand_lower != "all" and not _is_supported_brand_name(brand_lower):
+        return []
+    is_all_brand = (not brand_lower) or (brand_lower == "all")
+
+    exact_name_items = []
+    for item in stored_items:
+        if not _is_supported_item(item):
+            continue
+        if not is_all_brand and _item_brand(item) != brand_lower:
+            continue
+        item_name = str(item.get("name") or "").strip().lower()
+        item_text = str(item.get("text") or "").strip().lower()
+        item_code = str(item.get("search_code") or item.get("base_code") or "").strip().lower()
+        item_alias = str(item.get("display_name") or "").strip().lower()
+        if q in {item_name, item_text, item_code, item_alias}:
+            exact_name_items.append(item)
+        elif q_compact:
+            if q_compact in {
+                _compact_alnum(item_name),
+                _compact_alnum(item_text),
+                _compact_alnum(item_code),
+                _compact_alnum(item_alias),
+            }:
+                exact_name_items.append(item)
+
+    if exact_name_items:
+        exact_payload = _items_to_suggestion_payload(exact_name_items, limit=limit)
+        if exact_payload:
+            return exact_payload
+
     # Seed suggestions from the richer search ranking first so exact and near-exact
     # product hits are available before we fall back to lightweight prefix scans.
     seeded_items = search(query, smart=False, brand=brand)
@@ -1371,10 +1682,10 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     query_is_code = _is_code_or_model_query(query)
     exact_family_payload = []
     if query_is_code and (query_code_meta.get("full_compact") or query_code_meta.get("base_compact")):
-        brand_lower = (brand or "").strip().lower()
-        is_all_brand = (not brand_lower) or (brand_lower == "all")
         exact_family_items = []
         for item in stored_items:
+            if not _is_supported_item(item):
+                continue
             if not is_all_brand and _item_brand(item) != brand_lower:
                 continue
             item_code_meta = _get_item_code_metadata(item)
@@ -1397,8 +1708,6 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
         if exact_first:
             return exact_first
 
-    q = query.strip().lower()
-    q_compact = _compact_alnum(q)
     # Split query into words but preserve codes like K-1234
     q_words = [w for w in re.split(r'\s+', q) if len(w) >= 2]
     # Add compacted components (k282, 1234) for better lookups
@@ -1427,6 +1736,8 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
         )
 
     brand_lower = (brand or "").strip().lower()
+    if brand_lower and brand_lower != "all" and not _is_supported_brand_name(brand_lower):
+        return []
     is_all_brand = (not brand_lower) or (brand_lower == "all")
 
     # Also index with the full query as a compact token for direct matching
@@ -1435,6 +1746,8 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     # Score and rank candidates
     for idx in potential_indices:
         item = stored_items[idx]
+        if not _is_supported_item(item):
+            continue
         
         if not is_all_brand:
             if _item_brand(item) != brand_lower:
@@ -1449,8 +1762,10 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
         
         # Simple scoring
         score = 0
-        if q in name_lower: score += 10
-        if any(w in name_lower for w in q_words): score += 5
+        if q in name_lower: score += 400
+        for w in q_words:
+            if w in name_lower:
+                score += 80
         if query_code_meta.get("base_compact") and item_code_meta.get("base_compact") == query_code_meta["base_compact"]:
             score += 30
         if query_code_meta.get("full_compact") and item_code_meta.get("full_compact") == query_code_meta["full_compact"]:
@@ -1464,12 +1779,16 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
         # Boost items where the full query string appears in name (e.g. "450-1003" in "450-1003 G - Gold")
         if len(q) >= 3 and q in name_lower:
             score += 200
-        # Also boost if query compact matches the start of item name compact
-        if q_compact and len(q_compact) >= 3 and name_compact.startswith(q_compact):
-            score += 250
+        if q_compact and len(q_compact) >= 3:
+            if name_compact == q_compact or item_code_meta.get("full_compact") == q_compact:
+                score += 5000 # SUPER MASSIVE boost for exact code match
+            elif name_compact.startswith(q_compact):
+                score += 2000 # Very high boost for prefix match
+            elif q_compact in name_compact:
+                score += 500
 
         if item.get("source") == "Manual Entry":
-            score += 2000 # Massive boost
+            score += 3000 # Massive boost for manually added items/images
             
         if item.get("brand") in {"Aquant", "Kohler"}:
             score += 1000 # Extreme boost for core brands
@@ -1509,21 +1828,23 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     # Sort by score descending and then by full text length
     suggestions.sort(key=lambda x: (-x["score"], len(x["full_name"])))
     
-    final_results = _merge_suggestion_payloads(seeded_payload, limit=limit)
+    # 5. FINAL MERGE: Prioritize our custom-scored suggestions, then fill with seeded results
+    # Convert suggestions to the standard payload format
+    scored_payload = []
     for s in suggestions:
-        if len(final_results) >= limit:
-            break
         full_name = s["full_name"]
         parts = full_name.split(" - ", 1)
         name_desc = _clean_display_text(parts[1].strip()) if len(parts) > 1 else ""
-
-        final_results.append({
+        display_item = prepare_item_for_display(s["item"])
+        scored_payload.append({
             "text": _clean_display_text(s["code"]),
             "description": name_desc,
             "full_name": _clean_display_text(full_name),
-            "brand": s["brand"],
+            "display_name": display_item.get("display_name") or _clean_display_text(full_name),
+            "display_code": display_item.get("display_code") or _clean_display_text(s["code"]),
+            "brand": _clean_display_text(s["brand"]),
             "image": _best_item_image(s["item"]),
-            "raw_item": s["item"]
+            "raw_item": display_item
         })
 
-    return final_results
+    return _merge_suggestion_payloads(scored_payload, seeded_payload, limit=limit)

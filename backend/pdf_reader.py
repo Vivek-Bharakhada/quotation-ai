@@ -1389,7 +1389,10 @@ def extract_content(pdf_path, max_pages=None):
             #   K-702250IN-RH0-AF
             #   ...details...
             #   MRP ` 1,80,000.00
-            code_line_re = re.compile(r'^\s*K\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*\s*$', re.IGNORECASE)
+            # Modified regex to support multiple codes separated by / or spaces
+            kohler_code_pattern = r'K\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*'
+            code_line_re = re.compile(rf'^\s*{kohler_code_pattern}(?:\s*[/,]\s*{kohler_code_pattern})*\s*$', re.IGNORECASE)
+
             existing_codes = set()
             for it in page_items:
                 blob = f"{it.get('name', '')}\n{it.get('text', '')}"
@@ -1517,8 +1520,12 @@ def extract_content(pdf_path, max_pages=None):
                     if is_code_line:
                         if group_codes and (group_desc or group_prices):
                             flush_table_group()
-                        code = normalize_kohler_code(ln)
-                        group_codes.append(code)
+                        
+                        # Extract all codes from the line
+                        found_codes = kohler_code_re.findall(ln)
+                        for raw_c in found_codes:
+                            code = normalize_kohler_code(raw_c)
+                            group_codes.append(code)
                         continue
 
                     if is_mrp_line:

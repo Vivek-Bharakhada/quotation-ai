@@ -53,7 +53,8 @@
         "nsis",
         "dir"
       ],
-      "icon": null
+      "icon": null,
+      "signAndEditExecutable": false
     },
     "nsis": {
       "artifactName": "Shreeji Ceramica Setup ${version}.${ext}",

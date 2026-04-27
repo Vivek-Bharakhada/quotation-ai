@@ -69,8 +69,9 @@
   border-radius: 1.7rem;
   min-height: clamp(460px, 72vh, 760px);
   background-size: cover;
-  background-position: 55% center;
+  background-position: center center;
   background-repeat: no-repeat;
+  background-color: rgba(244, 246, 248, 0.96);
   padding: clamp(1.25rem, 2vw, 2.2rem);
   color: #0f172a;
   overflow: hidden;
@@ -166,14 +167,6 @@
   z-index: 100;
 }
 
-.db-hero-search {
-  margin-top: 1.5rem;
-  width: 100%;
-  max-width: 480px;
-  position: relative;
-  z-index: 1000;
-}
-
 .db-hero-subtitle {
   margin: 0 0 0.5rem 0;
   font-size: 0.95rem;
@@ -213,6 +206,7 @@
   flex-wrap: wrap;
   gap: 0.8rem;
 }
+
 
 .db-btn {
   border: 1px solid transparent;

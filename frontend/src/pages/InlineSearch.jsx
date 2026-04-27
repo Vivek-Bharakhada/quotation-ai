@@ -5,16 +5,123 @@ import './search.css';
 
 import BASE from '../api';
 import { resolveAssetUrl } from '../utils/url';
+import { sanitizeDisplayText } from '../utils/text';
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_MENU_HEIGHT = 380;
 const VIEWPORT_PADDING = 12;
+const FORCE_PDF_IMAGE_CODES = new Set([
+  'K-22786IN-4-BV',
+  'K-21970IN-4ND-BV',
+  'K-22792IN-4FP-BV',
+  'K-21969IN-4ND-BV',
+]);
+const BRAND_FALLBACK_IMAGES = {
+  Kohler: '/kohler_cover.jpg',
+  Aquant: '/hero.png',
+};
+
+function SuggestionThumbnail({ suggestion, product }) {
+  const [failedPrimary, setFailedPrimary] = useState(false);
+  const [failedFallback, setFailedFallback] = useState(false);
+
+  const candidateImage = resolveSuggestionImage(product || {}, suggestion || {});
+  const brand = String(product?.brand || suggestion?.brand || '').trim();
+  const fallbackImage = BRAND_FALLBACK_IMAGES[brand] || '/hero.png';
+  const primarySrc = candidateImage ? resolveAssetUrl(candidateImage) : '';
+  const fallbackSrc = resolveAssetUrl(fallbackImage);
+  const isPlaceholder = String(candidateImage || '').includes('Image_Not_Found') || String(candidateImage || '').includes('Image not Found');
+  const showPrimary = primarySrc && !isPlaceholder && !failedPrimary;
+  const showFallback = !showPrimary && fallbackSrc && !failedFallback;
+
+  if (showPrimary) {
+    return (
+      <img
+        src={primarySrc}
+        alt=""
+        onError={() => setFailedPrimary(true)}
+        style={{
+          width: '52px',
+          height: '52px',
+          objectFit: 'contain',
+          background: '#ffffff',
+          borderRadius: '10px',
+          padding: '4px',
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+
+  if (showFallback) {
+    return (
+      <img
+        src={fallbackSrc}
+        alt=""
+        onError={() => setFailedFallback(true)}
+        style={{
+          width: '52px',
+          height: '52px',
+          objectFit: 'cover',
+          background: 'rgba(95, 99, 104, 0.08)',
+          borderRadius: '10px',
+          padding: '4px',
+          flexShrink: 0,
+          border: '1px solid rgba(95, 99, 104, 0.16)',
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: '52px',
+        height: '52px',
+        borderRadius: '10px',
+        border: '1px solid rgba(95, 99, 104, 0.16)',
+        background: 'linear-gradient(135deg, rgba(95, 99, 104, 0.10), rgba(95, 99, 104, 0.04))',
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function getProductCode(product = {}, suggestion = {}) {
+  return String(
+    product.search_code
+    || product.base_code
+    || product.name
+    || suggestion.text
+    || suggestion.full_name
+    || suggestion.display_code
+    || ''
+  ).trim().toUpperCase();
+}
+
+function resolveSuggestionImage(product = {}, suggestion = {}) {
+  const code = getProductCode(product, suggestion);
+  if (FORCE_PDF_IMAGE_CODES.has(code)) {
+    return `/static/images/Kohler/${code}.pdf.png`;
+  }
+
+  const productImage = (product.images && product.images[0]) || '';
+  const suggestionImage = suggestion.image || '';
+  const brand = String(product.brand || suggestion.brand || '').trim();
+  const fallbackImage = BRAND_FALLBACK_IMAGES[brand] || '';
+  const isPlaceholder = (value) => String(value || '').includes('Image_Not_Found') || String(value || '').includes('Image not Found');
+  if (productImage && !isPlaceholder(productImage)) return productImage;
+  if (suggestionImage && !isPlaceholder(suggestionImage)) return suggestionImage;
+  return productImage || suggestionImage || fallbackImage || '';
+}
 
 export default function InlineSearch({ onAdd, disabled = false }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [imageErrors, setImageErrors] = useState({});
   const [menuStyle, setMenuStyle] = useState(null);
   const [menuPlacement, setMenuPlacement] = useState('down');
   const [error, setError] = useState('');
@@ -28,6 +135,12 @@ export default function InlineSearch({ onAdd, disabled = false }) {
     setLoading(false);
     setError('');
     setMenuStyle(null);
+    setImageErrors({});
+  };
+
+  const markImgError = (src) => {
+    if (!src) return;
+    setImageErrors((prev) => (prev[src] ? prev : { ...prev, [src]: true }));
   };
 
   useEffect(() => {
@@ -154,8 +267,13 @@ export default function InlineSearch({ onAdd, disabled = false }) {
 
     // Pick full data from raw_item (now provided by backend)
     const product = s.raw_item || {};
-    const fullText = product.text || s.description || '';
-    const nameOnly = fullText.split('\n')[0].trim() || s.description || 'Product';
+    const fullText = sanitizeDisplayText(
+      product.display_text || product.text || s.full_name || s.description || s.text || ''
+    );
+    const firstLine = fullText.split('\n')[0].trim();
+    const nameOnly = sanitizeDisplayText(
+      product.display_name || product.name || firstLine || s.full_name || s.description || s.text || 'Product'
+    );
 
     // Price extraction logic
     let finalPrice = product.price || '';
@@ -173,11 +291,14 @@ export default function InlineSearch({ onAdd, disabled = false }) {
       price: String(finalPrice || '0'),
       quantity: 1,
       discount: 0,
-      image: (product.images && product.images[0]) || s.image || null,
+      image: (() => {
+        const forced = resolveSuggestionImage(product, s);
+        return forced || null;
+      })(),
       room: '',
       rawText: fullText,
-      sku: product.sku || s.text || '',
-      size: product.size || '',
+      sku: sanitizeDisplayText(product.sku || s.text || ''),
+      size: sanitizeDisplayText(product.size || ''),
     };
 
     console.log('ITEM READY TO ADD:', newItem);
@@ -293,39 +414,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
             transition: 'transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease',
           }}
         >
-          {s.image ? (
-            <img
-              src={resolveAssetUrl(s.image)}
-              alt=""
-              style={{
-                width: '52px',
-                height: '52px',
-                objectFit: 'contain',
-                background: '#ffffff',
-                borderRadius: '10px',
-                padding: '4px',
-                flexShrink: 0,
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: '52px',
-                height: '52px',
-                background: 'var(--bg-color)',
-                borderRadius: '10px',
-                fontSize: '10px',
-                color: 'var(--text-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                border: '1px dashed rgba(95, 99, 104, 0.3)',
-              }}
-            >
-              NO IMG
-            </div>
-          )}
+          <SuggestionThumbnail suggestion={s} product={s.raw_item || {}} />
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
@@ -337,7 +426,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
                 overflowWrap: 'anywhere',
               }}
             >
-              {s.full_name || [s.text, s.description].filter(Boolean).join(' - ')}
+              {sanitizeDisplayText(s.display_name || s.full_name || s.description || s.text || 'Product')}
             </div>
             <div
               style={{
@@ -349,7 +438,11 @@ export default function InlineSearch({ onAdd, disabled = false }) {
                 overflowWrap: 'anywhere',
               }}
             >
-              {s.full_name && s.text && s.full_name !== s.text ? `Code: ${s.text}` : s.description}
+              {s.text
+                ? (s.display_code && s.display_code !== s.text
+                    ? `Code: ${sanitizeDisplayText(s.text)}`
+                    : sanitizeDisplayText(s.description || s.text))
+                : sanitizeDisplayText(s.description || s.full_name)}
             </div>
           </div>
 
@@ -366,7 +459,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
               flexShrink: 0,
             }}
           >
-            {(s.brand || 'Catalog').toUpperCase()}
+            {sanitizeDisplayText(s.brand || 'Catalog').toUpperCase()}
           </div>
         </div>
       ))}

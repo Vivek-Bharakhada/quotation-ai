@@ -1,0 +1,44 @@
+{
+  "appId": "com.quotationai.app",
+  "productName": "Shreeji Ceramica",
+  "directories": {
+    "output": "dist_client_ready"
+  },
+  "files": [
+    "build_verify_client/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "backend_sidecar_internal",
+      "to": "backend_sidecar"
+    }
+  ],
+  "win": {
+    "target": [
+      "nsis",
+      "dir"
+    ],
+    "icon": null,
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "artifactName": "Shreeji Ceramica Setup ${version}.${ext}",
+    "oneClick": true,
+    "allowToChangeInstallationDirectory": false,
+    "uninstallDisplayName": "Shreeji Ceramica",
+    "createDesktopShortcut": "always",
+    "createStartMenuShortcut": true,
+    "shortcutName": "Shreeji Ceramica",
+    "runAfterFinish": true
+  },
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
+  "asar": false,
+  "compression": "store",
+  "extraMetadata": {
+    "main": "electron/main.js"
+  },
+  "extends": null
+}

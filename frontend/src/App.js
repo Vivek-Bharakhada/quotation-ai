@@ -17,6 +17,7 @@ const APP_STATE_KEYS = {
   cart: 'quotation-ai/cart',
   page: 'quotation-ai/current-page',
   theme: 'quotation-ai/theme',
+  swCleanup: 'quotation-ai/sw-cleanup-v2',
 };
 
 function getStandaloneMode() {
@@ -30,13 +31,21 @@ function getStandaloneMode() {
   );
 }
 
+function getDesktopMode() {
+  return Boolean(typeof window !== 'undefined' && window.desktopApp && window.desktopApp.isDesktop);
+}
+
 function getInitialShellMode() {
   if (typeof window === 'undefined') {
     return 'website';
   }
 
-  const path = window.location.pathname.toLowerCase();
-  if (path === '/app' || path.startsWith('/app/')) {
+  if (getDesktopMode()) {
+    return 'app';
+  }
+
+  const hash = String(window.location.hash || '').toLowerCase();
+  if (hash === '#/app' || hash.startsWith('#/app/')) {
     return 'app';
   }
 
@@ -44,7 +53,7 @@ function getInitialShellMode() {
 }
 
 function getInitialPage() {
-  return 'dashboard';
+  return getDesktopMode() ? 'quotation' : 'dashboard';
 }
 
 function getInitialCart() {
@@ -73,13 +82,56 @@ function App() {
   const pageViewClass = `${currentPage}-view`;
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const cleanupKey = APP_STATE_KEYS.swCleanup;
+    if (window.localStorage.getItem(cleanupKey) === 'done') {
+      return;
+    }
+
+    window.localStorage.setItem(cleanupKey, 'done');
+
+    // Clear legacy PWA assets once so stale bundles stop showing old image fallbacks.
+    Promise.resolve()
+      .then(async () => {
+        try {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+        } catch (error) {
+          console.warn('Service worker cleanup failed', error);
+        }
+
+        try {
+          if ('caches' in window) {
+            const cacheKeys = await caches.keys();
+            await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+          }
+        } catch (error) {
+          console.warn('Cache cleanup failed', error);
+        }
+      })
+      .finally(() => {
+        window.location.reload();
+      });
+  }, []);
+
+  useEffect(() => {
     const syncShellMode = () => {
       if (typeof window === 'undefined') {
         return;
       }
 
-      const path = window.location.pathname.toLowerCase();
-      if (path === '/app' || path.startsWith('/app/')) {
+      if (getDesktopMode()) {
+        setShellMode('app');
+        return;
+      }
+
+      const hash = String(window.location.hash || '').toLowerCase();
+      if (hash === '#/app' || hash.startsWith('#/app/')) {
         setShellMode('app');
         return;
       }
@@ -87,10 +139,10 @@ function App() {
       setShellMode(getStandaloneMode() ? 'app' : 'website');
     };
 
-    window.addEventListener('popstate', syncShellMode);
+    window.addEventListener('hashchange', syncShellMode);
     syncShellMode();
 
-    return () => window.removeEventListener('popstate', syncShellMode);
+    return () => window.removeEventListener('hashchange', syncShellMode);
   }, []);
 
   useEffect(() => {
@@ -104,9 +156,9 @@ function App() {
       return;
     }
 
-    const nextPath = mode === 'app' ? '/app' : '/';
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
+    const nextHash = mode === 'app' ? '#/app' : '#/';
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
     }
     setShellMode(mode);
   };
@@ -315,7 +367,7 @@ function App() {
             {isOnline && installHelp && <span>{installHelp}</span>}
             {apiOverrideActive && (
               <span>
-                Custom backend active: <strong>{getApiBase()}</strong>
+                | Custom backend active: <strong>{getApiBase()}</strong>
               </span>
             )}
           </div>
