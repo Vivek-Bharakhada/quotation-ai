@@ -796,8 +796,18 @@ def _pick_best_image_match(item, matches):
 
 
 def _best_item_image(item):
-    """Prefer an exact model-name image when one exists on disk."""
+    """Prefer a manually set image path if it exists, otherwise find on disk."""
+    
+    # 1. First, check if there's a valid manually set image in the index
+    existing_matches = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
+    if existing_matches:
+        picked = _pick_best_image_match(item, existing_matches)
+        if picked:
+            return picked
+
+    # 2. Fallback to exact model-name matching on disk
     code_meta = _get_item_code_metadata(item)
+
     candidate_codes = []
     for key in ("full_code", "search_code", "base_code"):
         value = str(item.get(key, "") or code_meta.get(key, "")).strip()
@@ -830,13 +840,8 @@ def _best_item_image(item):
             if picked:
                 return picked
 
-    existing_matches = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
-    if existing_matches:
-        picked = _pick_best_image_match(item, existing_matches)
-        if picked:
-            return picked
-
     return None  # Never return placeholder image
+
 
 
 def _special_family_override_items(query_code_meta, brand_lower: str):
@@ -1668,10 +1673,10 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
             }:
                 exact_name_items.append(item)
 
+    exact_payload = []
     if exact_name_items:
         exact_payload = _items_to_suggestion_payload(exact_name_items, limit=limit)
-        if exact_payload:
-            return exact_payload
+
 
     # Seed suggestions from the richer search ranking first so exact and near-exact
     # product hits are available before we fall back to lightweight prefix scans.
@@ -1705,8 +1710,8 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
 
     if query_is_code:
         exact_first = _merge_suggestion_payloads(exact_family_payload, seeded_payload, limit=limit)
-        if exact_first:
-            return exact_first
+        # We'll merge these into the final results instead of returning early
+
 
     # Split query into words but preserve codes like K-1234
     q_words = [w for w in re.split(r'\s+', q) if len(w) >= 2]
@@ -1847,4 +1852,6 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
             "raw_item": display_item
         })
 
-    return _merge_suggestion_payloads(scored_payload, seeded_payload, limit=limit)
+    # Prioritize: 1. Exact Name/Code matches, 2. Code family matches, 3. Ranked keyword matches, 4. Seeded results
+    return _merge_suggestion_payloads(exact_payload, exact_first if 'exact_first' in locals() else [], scored_payload, seeded_payload, limit=limit)
+

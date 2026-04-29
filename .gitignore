@@ -102,4 +102,7 @@ backend/scratch/check704703.txt
 backend/scratch/index_format.txt
 backend/scratch/audit_summary.txt
 backend/scratch/autofix_p2_out.txt
-backend/scratch/autofix_rem_out.txt
+backend/scratch/
+backend/static/images/Aquant/Aquant_Page_*.png
+backend/static/images/Aquant/*_new.png
+
