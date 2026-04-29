@@ -446,20 +446,34 @@ export default function InlineSearch({ onAdd, disabled = false }) {
             </div>
           </div>
 
-          <div
-            style={{
-              fontSize: '0.68rem',
-              color: 'var(--primary-color)',
-              fontWeight: 800,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              background: 'var(--primary-gradient)',
-              borderRadius: '999px',
-              padding: '0.45rem 0.75rem',
-              flexShrink: 0,
-            }}
-          >
-            {sanitizeDisplayText(s.brand || 'Catalog').toUpperCase()}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
+            <div
+              style={{
+                fontSize: '0.68rem',
+                color: 'var(--primary-color)',
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                padding: '0.45rem 0.75rem',
+                borderRadius: '999px',
+                border: '1px solid var(--primary-color)',
+                background: 'rgba(99, 102, 241, 0.05)',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {sanitizeDisplayText(s.brand || 'Catalog').toUpperCase()}
+            </div>
+            <div
+              style={{
+                fontSize: '0.9rem',
+                fontWeight: 800,
+                color: s.price ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontFamily: 'var(--font-mono, monospace)',
+                opacity: s.price ? 1 : 0.6
+              }}
+            >
+              {s.price ? `₹${s.price}` : 'No Price'}
+            </div>
           </div>
         </div>
       ))}

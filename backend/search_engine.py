@@ -1612,6 +1612,7 @@ def _items_to_suggestion_payload(items, limit: int = 50):
             "display_code": display_item.get("display_code") or code,
             "brand": _clean_display_text(item.get("brand", "Aquant")),
             "image": _best_item_image(item),
+            "price": item.get("price"),
             "raw_item": display_item,
         })
         if len(final_results) >= limit:
@@ -1849,6 +1850,7 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
             "display_code": display_item.get("display_code") or _clean_display_text(s["code"]),
             "brand": _clean_display_text(s["brand"]),
             "image": _best_item_image(s["item"]),
+            "price": display_item.get("price"),
             "raw_item": display_item
         })
 
