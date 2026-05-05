@@ -1160,7 +1160,7 @@ def extract_content(pdf_path, max_pages=None):
             return None
 
         # Kohler model codes are consistently hyphenated (e.g. K-1063956, K-24149IN-F-BN).
-        kohler_code_re = re.compile(r'\bK\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*\b', re.IGNORECASE)
+        kohler_code_re = re.compile(r'\b(?:K\s*-|EX)[A-Z0-9]+(?:-[A-Z0-9]+)*\b', re.IGNORECASE)
         # Plumber codes like DUN-1101, U-0901, BZA-1904C
         plumber_code_re = re.compile(r'\b[A-Z]{1,4}\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*\b', re.IGNORECASE)
 
@@ -1198,7 +1198,7 @@ def extract_content(pdf_path, max_pages=None):
                 if code_match and "MRP" in text.upper():
                         
                         t_comp = re.sub(r'[\s/\-]+', '', text)
-                        price_match = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]{4,})', t_comp, re.IGNORECASE)
+                        price_match = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]+(?:\.\d+)?)', t_comp, re.IGNORECASE)
                         price = price_match.group(1).replace(",", "").strip() if price_match else "0"
                         
                         code = normalize_kohler_code(code_match.group(0))
@@ -1390,7 +1390,7 @@ def extract_content(pdf_path, max_pages=None):
             #   ...details...
             #   MRP ` 1,80,000.00
             # Modified regex to support multiple codes separated by / or spaces
-            kohler_code_pattern = r'K\s*-\s*[A-Z0-9]+(?:-[A-Z0-9]+)*'
+            kohler_code_pattern = r'(?:K\s*-|EX)[A-Z0-9]+(?:-[A-Z0-9]+)*'
             code_line_re = re.compile(rf'^\s*{kohler_code_pattern}(?:\s*[/,]\s*{kohler_code_pattern})*\s*$', re.IGNORECASE)
 
             existing_codes = set()

@@ -610,8 +610,33 @@ def save_index():
 def load_index(force: bool = False):
     global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache, _index_cache_signature
     
-    # Decide which index file to use
+    # 1. Decide which index file to use and perform automatic sync
     index_file = INDEX_FILE_PERSISTENT
+    
+    # NEW: Automatic Sync Logic
+    # If we are in a bundled environment, check if the bundled index should overwrite the persistent one.
+    if os.path.exists(INDEX_FILE_BUNDLED):
+        needs_sync = False
+        if not os.path.exists(INDEX_FILE_PERSISTENT):
+            needs_sync = True
+        else:
+            # Sync if bundled file is newer OR significantly different in size
+            bundled_mtime = os.path.getmtime(INDEX_FILE_BUNDLED)
+            persistent_mtime = os.path.getmtime(INDEX_FILE_PERSISTENT)
+            if bundled_mtime > (persistent_mtime + 5): # 5 second buffer
+                needs_sync = True
+        
+        if needs_sync:
+            try:
+                import shutil
+                shutil.copy2(INDEX_FILE_BUNDLED, INDEX_FILE_PERSISTENT)
+                print(f"Automatic Sync: Overwrote persistent index with latest bundled version.")
+                # Also clear the image cache to be safe
+                if os.path.exists(IMAGE_CACHE_FILE):
+                    os.remove(IMAGE_CACHE_FILE)
+            except Exception as e:
+                print(f"Sync Warning: Failed to auto-sync index: {e}")
+
     if not os.path.exists(index_file):
         index_file = INDEX_FILE_BUNDLED
         
@@ -796,35 +821,31 @@ def _pick_best_image_match(item, matches):
 
 
 def _best_item_image(item):
-    """Prefer a manually set image path if it exists, otherwise find on disk."""
+    """Prefer a verified image path from disk or one of the already assigned ones."""
     
-    # 1. First, check if there's a valid manually set image in the index
-    existing_matches = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
-    if existing_matches:
-        picked = _pick_best_image_match(item, existing_matches)
-        if picked:
-            return picked
-
-    # 2. Fallback to exact model-name matching on disk
+    # 1. Collect all candidates: both existing and from disk cache
+    candidates = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
+    
     code_meta = _get_item_code_metadata(item)
-
     candidate_codes = []
     for key in ("full_code", "search_code", "base_code"):
         value = str(item.get(key, "") or code_meta.get(key, "")).strip()
         if value:
             candidate_codes.append(value)
 
-    # Check if any of our candidate codes are in the blacklist
+    # Hard-coded placeholder handling
     for code in candidate_codes:
         if code in HARD_PLACEHOLDER_CODES:
-            return None  # Never return placeholder image
+            return None
 
+    # Check for forced PDF images
     for code in candidate_codes:
         if code in FORCE_PDF_IMAGE_CODES:
             forced = f"/static/images/Kohler/{code}.pdf.png"
             if _image_file_size(forced) >= _MIN_PRODUCT_IMAGE_SIZE:
-                return forced
+                candidates.append(forced)
 
+    # 2. Add candidates from disk cache (verified images)
     image_cache = _build_image_path_cache()
     for code in candidate_codes:
         compact_code = _compact_alnum(code)
@@ -832,15 +853,15 @@ def _best_item_image(item):
             continue
         matches = image_cache.get(compact_code)
         if matches:
-            # Filter to only paths that actually exist on disk with valid size
-            valid_matches = [m for m in matches if _image_file_size(m) >= _MIN_PRODUCT_IMAGE_SIZE]
-            if not valid_matches:
-                continue
-            picked = _pick_best_image_match(item, valid_matches)
-            if picked:
-                return picked
+            for m in matches:
+                if m not in candidates and _image_file_size(m) >= _MIN_PRODUCT_IMAGE_SIZE:
+                    candidates.append(m)
 
-    return None  # Never return placeholder image
+    # 3. Pick the best one from the unified pool
+    if candidates:
+        return _pick_best_image_match(item, candidates)
+
+    return None
 
 
 
