@@ -525,7 +525,7 @@ def split_aquant_segments(text):
     # Rule: Split before a 4-digit code if it's preceded by letters or more than 2 spaces
     tokens = []
     for tok in initial_tokens:
-        sub_tokens = re.split(r'(?=\b\d{4}[A-Z]{1,4}\b|\b\d{4}\s+[A-Z]{1,4}\b)', tok)
+        sub_tokens = re.split(r'(?=\b\d{4}(?:\s*[A-Z]{1,4})?\b)', tok)
         tokens.extend([clean_text(st) for st in sub_tokens if clean_text(st)])
 
     if not tokens:
@@ -1728,8 +1728,8 @@ def extract_content(pdf_path, max_pages=None):
             words = t.split()
             if not words: return False
             w = words[0]
-            # Simple numeric code: 1918, 9244
-            if w.isdigit() and 4 <= len(w) <= 7: return True
+            # Simple numeric code: 1918, 9244, 4001
+            if w.isdigit() and (4 <= len(w) <= 7 or w.startswith("40")): return True
             # Alpha-dash-numeric: A-123, AB-1234
             if re.match(r'^[A-Z]{1,3}-\d+', w): return True
             # Numeric-dash-numeric: 1424-200
@@ -1803,7 +1803,7 @@ def extract_content(pdf_path, max_pages=None):
                 grouped_products.append({
                     'col': col,
                     'text': text,
-                    'has_code': is_product_code(text),
+                    'has_code': any(is_product_code(line) for line in text.split('\n')),
                     'y0': y0,
                     'y1': y1,
                     'x0': x0,
@@ -1824,56 +1824,6 @@ def extract_content(pdf_path, max_pages=None):
                 expanded_lines.extend(split_aquant_segments(line))
             clean_lines = expanded_lines or clean_lines
             
-            # Split block into multiple sub-products if multiple codes present
-            sub_prods = []
-            current_sp = {"name": "", "text": "", "price": ""}
-            
-            # Pre-process lines to split those containing multiple product codes internally
-            split_lines = []
-            for l in clean_lines:
-                # If line has 'l' or '|' and multiple codes, split it
-                # Logic: Find all occurrences of product-code-like patterns
-                parts = re.split(r'\s+[l|I]\s+(?=\d{4}|[A-Z]{1,3}-\d+|\d{3,}-[A-Z])', l)
-                split_lines.extend([p.strip() for p in parts if p.strip()])
-
-            for l in split_lines:
-                # If line is a new product code, start new sub-product
-                if is_product_code(l) and not ('MRP' in l.upper()):
-                    if current_sp["name"]:
-                        sub_prods.append(current_sp)
-                    
-                    # Check for inline price for this specific code
-                    lp_comp = re.sub(r'[\s/\-]+', '', l)
-                    im = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]+)', lp_comp, re.IGNORECASE)
-                    sp_price = im.group(1).replace(",", "") if im else block_master_price
-                    
-                    current_sp = {"name": l[:120], "text": l, "price": sp_price}
-                else:
-                    is_size_line = "Size" in l or re.match(r'^\d+(\s*x\s*\d+)+', l)
-                    is_mrp_line = 'MRP' in l.upper()
-                    
-                    if not current_sp["name"] and not is_mrp_line:
-                        current_sp["name"] = l[:120]
-                    elif current_sp["name"] and len(current_sp["name"]) < 20 and not is_mrp_line and not is_size_line:
-                        # Append the descriptive name if it's not too long yet
-                        if l not in current_sp["name"]:
-                            current_sp["name"] += " - " + l[:100]
-                    
-                    current_sp["text"] += "\n" + l
-                    
-                    # Update price if MRP mentions found in secondary lines
-                    # Only update if the price is different and not zero
-                    lp_comp = re.sub(r'[\s/\-]+', '', l)
-                    im = re.search(r'(?:MRP|`|₹)[:.]?`?([\d,]{3,})', lp_comp, re.IGNORECASE)
-                    if im:
-                        new_p = im.group(1).replace(",", "")
-                        if new_p and new_p != current_sp["price"]:
-                            current_sp["price"] = new_p
-            
-            if current_sp["name"]:
-                sub_prods.append(current_sp)
-
-            sub_prods = []
             code_line_count = 0
             meaningful_detail_lines = []
             for line in clean_lines:
@@ -1889,104 +1839,46 @@ def extract_content(pdf_path, max_pages=None):
 
             compact_code_group = code_line_count >= 1 and not meaningful_detail_lines
 
-            if compact_code_group:
-                pending = []
-                for line in clean_lines:
-                    line_without_price = strip_price_markup(line)
-                    line_price = extract_price_value(line)
-                    line_has_code = bool(line_without_price and is_product_code(line_without_price))
-
-                    if line_has_code:
-                        pending.append({
-                            "name": line_without_price[:140],
-                            "text": line_without_price,
-                            "price": line_price or "",
-                            "_group_kind": "compact",
-                            "_price_source": "inline" if line_price else "pending",
-                        })
-                        if line_price:
-                            sub_prods.extend(pending)
-                            pending = []
-                        continue
-
-                    if line_price and pending:
-                        for pending_item in pending:
-                            if not pending_item["price"]:
-                                pending_item["price"] = line_price
-                                pending_item["_price_source"] = "group_mrp"
-                        sub_prods.extend(pending)
-                        pending = []
-                        continue
-
-                    if pending:
-                        for pending_item in pending:
-                            pending_item["text"] += "\n" + line
-
-                sub_prods.extend(pending)
-            else:
-                detail_item = {
-                    "name": "",
-                    "text": "",
-                    "price": "",
-                    "_group_kind": "detail",
-                    "_price_source": "missing",
-                }
-
-                for line in clean_lines:
-                    line_without_price = strip_price_markup(line)
-                    line_price = extract_price_value(line)
-                    price_label = extract_price_label(line)
-                    line_has_code = bool(line_without_price and is_product_code(line_without_price))
-                    is_size_line = "SIZE" in line.upper() or re.match(r'^\d+(\s*x\s*\d+)+', line, re.IGNORECASE)
-                    is_mrp_line = 'MRP' in line.upper()
-
-                    if line_has_code and detail_item["name"]:
-                        sub_prods.append(detail_item)
-                        detail_item = {
-                            "name": line_without_price[:140],
-                            "text": line_without_price,
-                            "price": line_price or "",
-                            "_group_kind": "detail",
-                            "_price_source": "inline" if line_price else "missing",
-                        }
-                        continue
-
-                    if line_has_code and not detail_item["name"]:
-                        detail_item["name"] = line_without_price[:140]
-                        detail_item["text"] = line_without_price
-                        if line_price:
-                            detail_item["price"] = line_price
-                            detail_item["_price_source"] = "inline"
-                        continue
-
-                    if not detail_item["name"] and not is_mrp_line and line_without_price:
-                        detail_item["name"] = line_without_price[:140]
-                    elif not detail_item["name"] and line_price and price_label:
-                        detail_item["name"] = price_label[:140]
-                    elif (
-                        detail_item["name"]
-                        and len(detail_item["name"]) < 72
-                        and not is_mrp_line
-                        and not is_size_line
-                        and not is_aquant_finish_line(line_without_price or line)
-                        and line_without_price
-                        and line_without_price not in detail_item["name"]
-                    ):
-                        detail_item["name"] += " - " + line_without_price[:100]
-
-                    if detail_item["text"]:
-                        detail_item["text"] += "\n" + line
-                    else:
-                        detail_item["text"] = detail_item["name"] if detail_item["name"] else line
-                        if detail_item["text"] != line:
-                            detail_item["text"] += "\n" + line
-
-                    if line_price:
-                        detail_item["price"] = line_price
-                        detail_item["_price_source"] = "inline"
-
-                if detail_item["name"]:
-                    sub_prods.append(detail_item)
+            sub_prods = []
+            current_item = None
+            header_text = ""
+            
+            for line in clean_lines:
+                line_has_code = is_product_code(line)
+                line_price = extract_price_value(line)
+                
+                if line_has_code:
+                    if current_item:
+                        sub_prods.append(current_item)
+                    
+                    # Start new item. Prepend header if it's short and relevant.
+                    name = line
+                    if header_text and len(header_text) < 100:
+                        name = f"{line} - {header_text}"
+                    
+                    current_item = {
+                        "name": name[:140],
+                        "text": line,
+                        "price": line_price or "",
+                        "_price_source": "inline" if line_price else "missing"
+                    }
+                elif current_item:
+                    # Append details to current item
+                    current_item["text"] += "\n" + line
+                    if not current_item["price"] and line_price:
+                        current_item["price"] = line_price
+                        current_item["_price_source"] = "inline"
+                    # If name is just the code, try to append more info but don't over-bloat
+                    if len(current_item["name"]) < 60 and not "MRP" in line.upper() and not "SIZE" in line.upper():
+                        current_item["name"] += " - " + line[:80]
+                else:
+                    # Text before any product code in this block is header text
+                    if not "MRP" in line.upper():
+                        if header_text: header_text += " " + line
+                        else: header_text = line
+            
+            if current_item:
+                sub_prods.append(current_item)
 
             # Filter out noisy non-product groups (e.g. index pages, page numbers)
             if not p['has_code'] and not is_price_line(text) and len(text) < 100:
