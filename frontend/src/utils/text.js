@@ -31,5 +31,8 @@ export function sanitizeDisplayText(value) {
     .replace(/Ã‚/g, '')
     .replace(/Â/g, ' ')
     .replace(/\s{2,}/g, ' ')
+    .split('\n')
+    .filter(line => !line.trim().toUpperCase().startsWith('MRP'))
+    .join('\n')
     .trim();
 }

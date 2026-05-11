@@ -4,23 +4,27 @@ import os
 import re
 import threading
 import unicodedata
-
-import numpy as np
-
-import cloud_storage
-from app_paths import resolve_data_dir
-
 import sys
+from datetime import datetime
+
+# Priority environment setup
 is_frozen = getattr(sys, 'frozen', False)
 EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.path.dirname(os.path.abspath(__file__))
 _MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
-
 BUNDLED_DIR = _MEIPASS
 if is_frozen:
-    # Handle PyInstaller 6+ --contents-directory layout
     possible_internal = os.path.join(_MEIPASS, "_internal")
     if os.path.isdir(possible_internal):
         BUNDLED_DIR = possible_internal
+
+# Heavy AI libraries are temporarily disabled to prevent Windows environment hangs
+# from sentence_transformers import SentenceTransformer
+# import torch
+
+import numpy as np
+import cloud_storage
+from app_paths import resolve_data_dir
+
 DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
 
 # Priority path for search index
@@ -32,7 +36,7 @@ INDEX_FILE = INDEX_FILE_PERSISTENT
 IMAGE_CACHE_FILE = os.path.join(DATA_DIR, "image_path_cache.json")
 IMAGE_CACHE_FILE_BUNDLED = os.path.join(BUNDLED_DIR, "image_path_cache.json")
 
-# Lazy model loading - loads in background only when needed
+# AI Search is disabled to ensure stability on all Windows systems
 AI_AVAILABLE = False
 model = None
 _model_lock = threading.Lock()
@@ -40,29 +44,13 @@ _model_loading = False
 
 def _load_model_background():
     global model, AI_AVAILABLE, _model_loading
-    try:
-        print("Loading Semantic Model in background...")
-        from sentence_transformers import SentenceTransformer
-        m = SentenceTransformer('all-MiniLM-L6-v2')
-        with _model_lock:
-            model = m
-            AI_AVAILABLE = True
-        print("Semantic Model Loaded OK.")
-    except Exception as e:
-        print(f"Warning: Semantic model failed to load (possibly OOM): {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        _model_loading = False
+    AI_AVAILABLE = False
+    _model_loading = False
+    print("Semantic Model Disabled (Stable Keyword-only mode active).")
 
 def ensure_model_loaded():
     """Trigger model loading if not already started."""
-    global _model_loading
-    
-    if model is None and not _model_loading:
-        _model_loading = True
-        print("Lazy Loading triggered for Semantic Model...")
-        threading.Thread(target=_load_model_background, daemon=True).start()
+    pass
 
 # REMOVED: immediate load on import
 # ensure_model_loaded()
@@ -323,6 +311,15 @@ def _clean_display_text(text: str) -> str:
     return s.strip()
 
 
+def _strip_mrp_lines(text: str) -> str:
+    """Remove lines starting with 'MRP' to avoid redundant price display in UI/PDF."""
+    if not text:
+        return ""
+    lines = str(text).splitlines()
+    filtered = [line for line in lines if not re.search(r'^\s*MRP\b', line, re.IGNORECASE)]
+    return "\n".join(filtered).strip()
+
+
 def _try_fix_mojibake(value: str) -> str:
     text = str(value or "")
     if not any(ch in text for ch in ("Ã", "â", "Â")):
@@ -410,7 +407,7 @@ def prepare_item_for_display(item):
     display_item["display_name"] = _clean_display_text(display_name)
     display_item["display_code"] = _clean_display_text(display_code)
     if raw_text:
-        display_item["display_text"] = raw_text
+        display_item["display_text"] = _strip_mrp_lines(raw_text)
 
     return display_item
 
@@ -610,6 +607,8 @@ def save_index():
 def load_index(force: bool = False):
     global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache, _index_cache_signature
     
+    # print(f"DEBUG: load_index(force={force})")
+    
     # 1. Decide which index file to use and perform automatic sync
     index_file = INDEX_FILE_PERSISTENT
     
@@ -629,12 +628,18 @@ def load_index(force: bool = False):
         if needs_sync:
             try:
                 import shutil
+                with open("backend_debug.txt", "a") as f:
+                    f.write(f"{datetime.now()} - Syncing index files...\n")
                 shutil.copy2(INDEX_FILE_BUNDLED, INDEX_FILE_PERSISTENT)
+                with open("backend_debug.txt", "a") as f:
+                    f.write(f"{datetime.now()} - Syncing done.\n")
                 print(f"Automatic Sync: Overwrote persistent index with latest bundled version.")
                 # Also clear the image cache to be safe
                 if os.path.exists(IMAGE_CACHE_FILE):
                     os.remove(IMAGE_CACHE_FILE)
             except Exception as e:
+                with open("backend_debug.txt", "a") as f:
+                    f.write(f"{datetime.now()} - Sync Error: {e}\n")
                 print(f"Sync Warning: Failed to auto-sync index: {e}")
 
     if not os.path.exists(index_file):
@@ -1657,13 +1662,16 @@ def _merge_suggestion_payloads(*payload_groups, limit: int = 50):
 
 
 def get_suggestions(query: str, limit: int = 50, brand: str = None):
+    print(f"DEBUG: get_suggestions('{query}') started")
     if not query or len(query.strip()) < 2:
         return []
 
     # Start model loading in background if it's the first search
     ensure_model_loaded()
 
+    print("DEBUG: calling load_index()")
     load_index()
+    print(f"DEBUG: load_index() finished, items count: {len(stored_items) if stored_items else 0}")
     if not stored_items:
         return []
 

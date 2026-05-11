@@ -150,6 +150,7 @@ function RoomCombobox({ value, options, placeholder, onValueChange }) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] = useState('down');
   const [menuStyle, setMenuStyle] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
   const menuRef = useRef(null);
@@ -161,6 +162,7 @@ function RoomCombobox({ value, options, placeholder, onValueChange }) {
 
       if (!clickedInsideField && !clickedInsideMenu) {
         setIsOpen(false);
+        setIsSearching(false);
       }
     };
 
@@ -170,15 +172,19 @@ function RoomCombobox({ value, options, placeholder, onValueChange }) {
 
   const currentValue = value || '';
   const normalizedValue = currentValue.trim().toLowerCase();
-  const filteredOptions = options.filter((option) =>
-    option.toLowerCase().includes(normalizedValue)
-  );
+  
+  // Show all options if not explicitly searching (i.e., on focus or click)
+  const filteredOptions = isSearching 
+    ? options.filter((option) => option.toLowerCase().includes(normalizedValue))
+    : options;
+
   const hasExactMatch = options.some((option) => option.toLowerCase() === normalizedValue);
   const canUseTypedValue = currentValue.trim() && !hasExactMatch;
 
   const commitValue = (nextValue) => {
     onValueChange(nextValue);
     setIsOpen(false);
+    setIsSearching(false);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -275,8 +281,12 @@ function RoomCombobox({ value, options, placeholder, onValueChange }) {
         onChange={(e) => {
           onValueChange(e.target.value);
           setIsOpen(true);
+          setIsSearching(true);
         }}
-        onFocus={() => setIsOpen(true)}
+        onFocus={() => {
+          setIsOpen(true);
+          setIsSearching(false);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -307,6 +317,7 @@ function RoomCombobox({ value, options, placeholder, onValueChange }) {
 
 
 export default function Quotation({ cart }) {
+  const [activeRoom, setActiveRoom] = useState('');
   // We no longer restore the draft on mount to ensure the page feels fresh on reload
   const [client, setClient] = useState(blankClient);
   const [showGstInput, setShowGstInput] = useState(false);
@@ -519,7 +530,7 @@ export default function Quotation({ cart }) {
   };
 
   const addItem = () => {
-    setItems([...items.map(sanitizeItem), createBlankItem()]);
+    setItems([...items.map(sanitizeItem), { ...createBlankItem(), room: activeRoom }]);
   };
 
   const removeItem = (index) => {
@@ -960,13 +971,14 @@ export default function Quotation({ cart }) {
         <InlineSearch 
           onAdd={(newItem) => {
             if (!newItem) return;
+            const itemWithRoom = { ...newItem, room: activeRoom };
             setItems((prev) => {
               // Replace the first item if it's completely blank
               const isFirstBlank = prev.length === 1 && !prev[0].name && !prev[0].price && !prev[0].rawText && !prev[0].sku;
               if (isFirstBlank) {
-                return [newItem];
+                return [itemWithRoom];
               }
-              return [...prev, newItem];
+              return [...prev, itemWithRoom];
             });
             
             // Visual feedback
@@ -993,9 +1005,22 @@ export default function Quotation({ cart }) {
       </section>
 
       <section className="qt-items-section" style={{ position: 'relative', zIndex: 1 }}>
-        <div className="qt-items-head">
-          <h3>Itemized List</h3>
-          <button onClick={addItem} className="qt-add-row">
+        <div className="qt-items-head" style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>Itemized List</h3>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              CURRENT ROOM:
+            </span>
+            <RoomCombobox
+              value={activeRoom}
+              options={roomOptions}
+              placeholder="Select or Create Section..."
+              onValueChange={setActiveRoom}
+            />
+          </div>
+
+          <button onClick={addItem} className="qt-add-row" style={{ marginLeft: 'auto' }}>
             + Add Row
           </button>
         </div>

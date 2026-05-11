@@ -760,9 +760,7 @@ def merge_variant_details(item, generic_desc="", finish_label=""):
             continue
         merged_lines.append(line)
 
-    if str(item.get("price") or "0") not in {"", "0"}:
-        merged_lines.append(f"MRP : ` {item['price']}/-")
-
+    # MRP line removed to avoid redundancy
     item["text"] = "\n".join(merged_lines)
 
 

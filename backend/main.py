@@ -1,4 +1,4 @@
-﻿print("--- BACKEND STARTING ---")
+print("--- BACKEND STARTING ---")
 print("Importing FastAPI...")
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
@@ -1011,7 +1011,7 @@ if __name__ == "__main__":
     import uvicorn
     try:
         print("Starting Uvicorn...")
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=8000, http="h11", loop="asyncio")
     except Exception as e:
         import traceback
         error_msg = f"FATAL ERROR during backend startup: {e}\n{traceback.format_exc()}"
