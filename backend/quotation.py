@@ -3,7 +3,7 @@ import sys
 import urllib.request
 from datetime import datetime
 from html import escape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage, HRFlowable, Flowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -130,7 +130,7 @@ def _resolve_item_image(base_dir, item):
     for real_p in candidate_paths:
         if real_p and os.path.exists(real_p):
             try:
-                return RLImage(real_p, width=42, height=42, kind='proportional')
+                return RLImage(real_p, width=58, height=58, kind='bound')
             except Exception:
                 continue
     return ""
@@ -189,11 +189,11 @@ def generate_quote(data):
         if show_bg_logo and logo_path and os.path.exists(logo_path):
             canvas.saveState()
             canvas.setFillAlpha(0.12)  # Professional watermark opacity
-            logo_w, logo_h = 420, 260
+            logo_w, logo_h = 280, 175
             canvas.drawImage(
                 logo_path,
                 (page_w - logo_w) / 2,
-                (page_h - logo_h) / 2,
+                (page_h - logo_h) / 2 - 40,
                 width=logo_w,
                 height=logo_h,
                 preserveAspectRatio=True,
@@ -212,7 +212,7 @@ def generate_quote(data):
     # ── 1. Header Branding section ──────────────────────────────────────────
     if show_bg_logo:
         # A. Brand Logos (Aquant, Kohler)
-        def _brand_img(b_name, filename, w=48, h=25):
+        def _brand_img(b_name, filename, w=70, h=35):
             p = os.path.join(base_dir, "static", filename)
             # Fallback if specific brand files missing/broken
             if b_name == 'AQUANT' and (not os.path.exists(p) or os.path.getsize(p) < 100):
@@ -230,32 +230,26 @@ def generate_quote(data):
         aquant_img  = _brand_img('AQUANT', "brand_aquant.png")
         kohler_img  = _brand_img('KOHLER', "brand_kohler.png")
         
-        brands_row = Table([[aquant_img, kohler_img]], colWidths=[60, 60])
+        brands_row = Table([[kohler_img, aquant_img]], colWidths=[80, 80])
         brands_row.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
 
-        # B. Showroom Info (Center-Right)
-        name_style = ParagraphStyle('N', parent=styles['Normal'], fontSize=22, fontName='Helvetica-Bold', textColor=colors.HexColor("#334155"), alignment=2, leading=26)
-        tag_style = ParagraphStyle('T', parent=styles['Normal'], fontSize=10, fontName='Helvetica-BoldOblique', textColor=colors.HexColor("#eab308"), alignment=2, leading=14)
-        contact_style = ParagraphStyle('C', parent=styles['Normal'], fontSize=8.5, textColor=colors.HexColor("#64748b"), alignment=2, leading=12)
+        # B. Center: empty spacer
+        info_cell = [Spacer(1, 4)]
 
-        info_cell = [
-            Paragraph(COMPANY_NAME, name_style),
-            Spacer(1, 2),
-            Paragraph(COMPANY_TAGLINE, tag_style),
-            Spacer(1, 2),
-            Paragraph(f"Ph: {COMPANY_PHONE} | {COMPANY_EMAIL}", contact_style),
-        ]
-
-        # C. Pictorial Logo (Far Right)
+        # C. Shreeji Logo (Far Right, without phone number)
         shreeji_logo = ""
         if logo_path and os.path.exists(logo_path):
-            shreeji_logo = RLImage(logo_path, width=75, height=55, kind='proportional')
+            shreeji_logo = RLImage(logo_path, width=145, height=105, kind='proportional')
+
+        right_cell = [Spacer(1, 6), shreeji_logo] if shreeji_logo else []
 
         # Assemble Header Table
-        header_table = Table([[brands_row, info_cell, shreeji_logo]], colWidths=[175, 255, 80])
+        header_table = Table([[brands_row, info_cell, right_cell]], colWidths=[170, 120, 220])
         header_table.setStyle(TableStyle([
-            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
-            ('LINEAFTER',  (0, 0), (0,  0),   0.5, colors.lightgrey), # Vertical separator
+            ('VALIGN',     (0, 0), (1, 0), 'MIDDLE'),
+            ('VALIGN',     (2, 0), (2, 0), 'MIDDLE'),
+            ('ALIGN',      (2, 0), (2, 0), 'CENTER'),
+            ('LINEAFTER',  (0, 0), (0,  0),   0.5, colors.lightgrey),
             ('LEFTPADDING', (0,0), (-1,-1), 0),
             ('RIGHTPADDING',(0,0), (-1,-1), 0),
         ]))
@@ -265,15 +259,36 @@ def generate_quote(data):
     else:
         elements.append(Spacer(1, 40))
 
-    # ── 2. Title & Quotation Meta section ────────────────────────────────────
     if show_bg_logo:
-        title_style = ParagraphStyle('TS', parent=styles['Normal'], fontSize=20, fontName='Helvetica-Bold', textColor=colors.HexColor("#e0a020"), alignment=0) # Gold/Yellow Left Aligned
+        # ── Address Banner (above Business Proposal title, containing Address and Prepared By) ──────────────
+        addr_style = ParagraphStyle('Addr', parent=styles['Normal'],
+            fontSize=9, fontName='Helvetica-Bold',
+            textColor=colors.white, alignment=1, leading=13)
+        
+        addr_text = "Opp. Indrapuri Atithi Gruh, Waghodia Road, Vadodara - 390019"
+        if made_by:
+            prepared_by_str = f"Prepared By: {made_by} - {made_by_phone}" if made_by_phone else f"Prepared By: {made_by}"
+            addr_text += f"   |   {prepared_by_str}"
+
+        addr_table = Table(
+            [[Paragraph(addr_text, addr_style)]],
+            colWidths=[515]
+        )
+        addr_table.setStyle(TableStyle([
+            ('BACKGROUND',   (0,0), (-1,-1), colors.HexColor("#1e3a5f")),
+            ('TOPPADDING',   (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING',(0,0), (-1,-1), 6),
+            ('LEFTPADDING',  (0,0), (-1,-1), 8),
+            ('RIGHTPADDING', (0,0), (-1,-1), 8),
+        ]))
+        elements.append(addr_table)
+        elements.append(Spacer(1, 8))
+
+        title_style = ParagraphStyle('TS', parent=styles['Normal'], fontSize=15, fontName='Helvetica-Bold', textColor=colors.HexColor("#e0a020"), alignment=0)
         
         meta_style = ParagraphStyle('MS', parent=styles['Normal'], fontSize=8.5, fontName='Helvetica-Bold', alignment=2, leading=11)
         quote_id = quote_number if quote_number else f"SC-{today_str.replace(' ', '')}"
         meta_text = [f"<b>No:</b> {quote_id}", f"<b>Date:</b> {today_str}"]
-        if made_by:
-            meta_text.append(f"<b>Prepared By: {made_by} - {made_by_phone}</b>" if made_by_phone else f"<b>Prepared By: {made_by}</b>")
         
         meta_para = Paragraph("<br/>".join(meta_text), meta_style)
         
@@ -398,7 +413,7 @@ def generate_quote(data):
 
             section_table = Table(
                 section_rows,
-                colWidths=[20, 42, 170, 48, 50, 30, 58, 39, 75],
+                colWidths=[20, 62, 158, 48, 50, 30, 58, 39, 67],
                 repeatRows=1,
             )
 
@@ -588,19 +603,34 @@ def generate_quote(data):
         terms = [
             Paragraph("Terms & Conditions:", terms_title),
             Paragraph("1. Quotation is valid for 15 days from the issued date.", terms_text),
-            Paragraph("2. 100% advance payment required along with the purchase order.", terms_text),
-            Paragraph("3. Goods once sold will not be taken back or exchanged.", terms_text),
-            Paragraph("4. Subject to local jurisdiction only.", terms_text),
+            Paragraph("2. Payment terms 100% advance.", terms_text),
+            Paragraph("3. Some products may have an associated image or photo. These are for reference only and should be considered illustrative.", terms_text),
+            Paragraph("4. Freight charges will be extra.", terms_text),
+            Paragraph("5. Tentative delivery period for concealed parts will be 3-5 working days, And for special finishes it will be 7 working days.", terms_text),
+            Paragraph("6. Offer Value is inclusive of G.S.T.", terms_text),
+            Paragraph("7. Goods once sold will not be taken back or exchanged.", terms_text),
+            Paragraph("8. Subject to local jurisdiction only.", terms_text),
         ]
         
-        sig_style = ParagraphStyle('S1', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', alignment=2)
-        sig_line = ParagraphStyle('S2', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Bold', alignment=2, spaceBefore=45)
-        
-        signatory = [Paragraph("For Shreeji Ceramica", sig_style), Paragraph("Authorized Signatory", sig_line)]
-        
+        # ── Professional Stamp Image ──────────────────────────────────────
+        stamp_path = os.path.join(base_dir, "static", "stamp_seal.png")
+        if os.path.exists(stamp_path):
+            stamp_img = RLImage(stamp_path, width=115, height=115, kind='bound')
+        else:
+            stamp_img = Spacer(1, 115)
+
+        signatory = [
+            stamp_img,
+        ]
+
         foot_table = Table([[terms, signatory]], colWidths=[300, 215])
-        foot_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+        foot_table.setStyle(TableStyle([
+            ('VALIGN',  (0,0), (-1,-1), 'MIDDLE'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('ALIGN', (1,0), (1,0), 'CENTER'),
+        ]))
         elements.append(foot_table)
+
 
     # Build
     doc.build(elements, onFirstPage=draw_background, onLaterPages=draw_background)
