@@ -21,6 +21,28 @@ const BRAND_FALLBACK_IMAGES = {
   Aquant: '/hero.png',
 };
 
+const stripProductCode = (text = '') => {
+  let val = String(text || '').trim();
+  if (!val) return '';
+
+  // 1. Remove leading code followed by ' - '
+  const dashIndex = val.indexOf(' - ');
+  if (dashIndex > 0) {
+    const firstPart = val.substring(0, dashIndex).trim();
+    const hasDigits = /\d/.test(firstPart);
+    if (hasDigits && firstPart.length < 25) {
+      val = val.substring(dashIndex + 3).trim();
+    }
+  }
+
+  // 2. Remove trailing code in parentheses
+  val = val.replace(/\s*[\(\[]\s*K-[A-Z0-9\-]+\s*[\)\]]/gi, '').trim();
+  val = val.replace(/\s*[\(\[]\s*\d{4,}[A-Z0-9\-]*\s*[\)\]]/gi, '').trim();
+
+  return val;
+};
+
+
 function SuggestionThumbnail({ suggestion, product }) {
   const [failedPrimary, setFailedPrimary] = useState(false);
   const [failedFallback, setFailedFallback] = useState(false);
@@ -275,6 +297,13 @@ export default function InlineSearch({ onAdd, disabled = false }) {
       product.display_name || product.name || firstLine || s.full_name || s.description || s.text || 'Product'
     );
 
+    const cleanedNameOnly = stripProductCode(nameOnly);
+    const lines = fullText.split('\n');
+    if (lines.length > 0) {
+      lines[0] = stripProductCode(lines[0]);
+    }
+    const cleanedFullText = lines.join('\n');
+
     // Price extraction logic
     let finalPrice = product.price || '';
     if (product.variant_prices && Object.keys(product.variant_prices).length > 0) {
@@ -287,7 +316,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
     }
 
     const newItem = {
-      name: nameOnly,
+      name: cleanedNameOnly,
       price: String(finalPrice || '0'),
       quantity: 1,
       discount: 0,
@@ -296,7 +325,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
         return forced || null;
       })(),
       room: '',
-      rawText: fullText,
+      rawText: cleanedFullText,
       sku: sanitizeDisplayText(product.sku || s.text || ''),
       size: sanitizeDisplayText(product.size || ''),
     };

@@ -59,6 +59,28 @@ const FORCE_IMAGE_BY_CODE = new Map([
 const isPlaceholderImage = (value) =>
   String(value || '').includes('Image_Not_Found') || String(value || '').includes('Image not Found');
 
+const stripProductCode = (text = '') => {
+  let val = String(text || '').trim();
+  if (!val) return '';
+
+  // 1. Remove leading code followed by ' - '
+  const dashIndex = val.indexOf(' - ');
+  if (dashIndex > 0) {
+    const firstPart = val.substring(0, dashIndex).trim();
+    const hasDigits = /\d/.test(firstPart);
+    if (hasDigits && firstPart.length < 25) {
+      val = val.substring(dashIndex + 3).trim();
+    }
+  }
+
+  // 2. Remove trailing code in parentheses
+  val = val.replace(/\s*[\(\[]\s*K-[A-Z0-9\-]+\s*[\)\]]/gi, '').trim();
+  val = val.replace(/\s*[\(\[]\s*\d{4,}[A-Z0-9\-]*\s*[\)\]]/gi, '').trim();
+
+  return val;
+};
+
+
 const extractLeadingCode = (value = '') => {
   const text = String(value || '').trim().toUpperCase();
   const match = text.match(/([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
@@ -104,18 +126,28 @@ const sanitizeItem = (item = {}) => {
 
 const mapCartToItems = (cart = []) =>
   cart && cart.length > 0
-    ? cart.map((item) => sanitizeItem({
-        name: item.name,
-        price: item.price || '0',
-        quantity: 1,
-        discount: 0,
-        image: normalizeItemImage(item),
-        room: '',
-        rawText: item.rawText || item.text || '',
-        sku: item.sku || '',
-        size: item.size || '',
-        raw_item: item.raw_item || item,
-      }))
+    ? cart.map((item) => {
+        const nameOnly = stripProductCode(item.name || '');
+        const fullText = item.rawText || item.text || '';
+        const lines = fullText.split('\n');
+        if (lines.length > 0) {
+          lines[0] = stripProductCode(lines[0]);
+        }
+        const cleanedFullText = lines.join('\n');
+
+        return sanitizeItem({
+          name: nameOnly,
+          price: item.price || '0',
+          quantity: 1,
+          discount: 0,
+          image: normalizeItemImage(item),
+          room: '',
+          rawText: cleanedFullText,
+          sku: item.sku || '',
+          size: item.size || '',
+          raw_item: item.raw_item || item,
+        });
+      })
     : [createBlankItem()];
 
 const normalizeQuoteHistory = (value) => (Array.isArray(value) ? value : []);

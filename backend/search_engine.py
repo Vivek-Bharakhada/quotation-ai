@@ -751,6 +751,17 @@ def _code_like(text: str) -> bool:
 def _compact_alnum(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', '', text.lower())
 
+def _clean_kohler_numeric_code(code: str) -> str:
+    c = str(code or "").strip().lower()
+    if c.startswith('k') and len(c) > 1 and c[1].isdigit():
+        c = c[1:]
+    if c.endswith('in') and len(c) > 2 and c[:-2].isdigit():
+        c = c[:-2]
+    elif c.endswith('t') and len(c) > 1 and c[:-1].isdigit():
+        c = c[:-1]
+    return c
+
+
 def _looks_like_model_code(text: str) -> bool:
     """True if the string contains a digit and likely represents a product code."""
     if not text: return False
@@ -1217,6 +1228,15 @@ def search(query: str, smart: bool = False, brand: str = None):
         if len(str(meta_value or "").strip()) >= 1:
             lookup_keys.add(str(meta_value).lower())
 
+    # Expand lookup keys for Kohler numeric codes
+    extra_lookup_keys = set()
+    for key in lookup_keys:
+        if key.isdigit() and len(key) >= 3:
+            extra_lookup_keys.add(f"k{key}")
+            extra_lookup_keys.add(f"k{key}in")
+            extra_lookup_keys.add(f"{key}in")
+    lookup_keys.update(extra_lookup_keys)
+
     for key in lookup_keys:
         if key in keyword_index:
             candidate_indices.update(keyword_index[key])
@@ -1287,7 +1307,14 @@ def search(query: str, smart: bool = False, brand: str = None):
             # leak into a plain "1333" search.
             if query_base_compact and item_code_meta.get("base_compact") not in {query_base_compact, ""}:
                 item_base_compact = item_code_meta.get("base_compact", "")
-                if item_base_compact.endswith(query_base_compact):
+                
+                # Check cleaned Kohler numeric codes
+                q_clean = _clean_kohler_numeric_code(query_base_compact)
+                i_clean = _clean_kohler_numeric_code(item_base_compact)
+                
+                if q_clean and q_clean == i_clean:
+                    pass
+                elif item_base_compact.endswith(query_base_compact):
                     pass
                 elif not (
                     query_full_compact
@@ -1302,7 +1329,14 @@ def search(query: str, smart: bool = False, brand: str = None):
                 elif _code_relaxed(item_full_compact) == _code_relaxed(query_full_compact):
                     best = max(best, 3620.0 + quality_bonus)
 
-            if query_base_compact and item_code_meta.get("base_compact") == query_base_compact:
+            # If base compact matches (either exactly or cleaned Kohler-wise)
+            q_clean = _clean_kohler_numeric_code(query_base_compact)
+            item_bc = item_code_meta.get("base_compact", "")
+            i_clean = _clean_kohler_numeric_code(item_bc)
+            
+            base_matched = query_base_compact and (item_bc == query_base_compact or (q_clean and q_clean == i_clean))
+
+            if base_matched:
                 if query_variant_compact:
                     if item_code_meta.get("variant_compact") == query_variant_compact:
                         best = max(best, 3520.0 + quality_bonus)
@@ -1315,7 +1349,9 @@ def search(query: str, smart: bool = False, brand: str = None):
 
             # Highest confidence: exact compact token equality (with OCR-tolerant equivalent).
             has_exact_code = any(
-                (tok_compact == query_code) or (_code_relaxed(tok_compact) == query_code_relaxed)
+                (tok_compact == query_code) or 
+                (_code_relaxed(tok_compact) == query_code_relaxed) or 
+                (_clean_kohler_numeric_code(tok_compact) == _clean_kohler_numeric_code(query_code))
                 for tok_compact in token_compacts
             )
             if has_exact_code:
