@@ -1093,9 +1093,27 @@ export default function Quotation({ cart }) {
                 <input
                   className="qt-field qt-name-field"
                   name="name"
-                  value={item.name}
+                  value={(() => {
+                    const sku = (item.sku || '').trim();
+                    const name = (item.name || '').trim();
+                    if (sku && name) return `${sku} - ${name}`;
+                    if (sku) return sku;
+                    return name;
+                  })()}
                   placeholder="Item Name"
-                  onChange={(e) => handleItemChange(index, e)}
+                  onChange={(e) => {
+                    // Parse back: if user edits, split on first ' - '
+                    const val = e.target.value;
+                    const dashIdx = val.indexOf(' - ');
+                    if (dashIdx > 0 && item.sku) {
+                      const newSku = val.substring(0, dashIdx).trim();
+                      const newName = val.substring(dashIdx + 3).trim();
+                      handleItemValueChange(index, 'sku', newSku);
+                      handleItemValueChange(index, 'name', newName);
+                    } else {
+                      handleItemChange(index, e);
+                    }
+                  }}
                 />
                 <RoomCombobox
                   value={item.room || ''}

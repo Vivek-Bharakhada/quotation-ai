@@ -302,7 +302,21 @@ export default function InlineSearch({ onAdd, disabled = false }) {
     if (lines.length > 0) {
       lines[0] = stripProductCode(lines[0]);
     }
-    const cleanedFullText = lines.join('\n');
+    // Strip out product name from description — keep only product details/specs
+    const detailLines = lines.filter((line, idx) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false; // skip empty lines
+      // Skip lines that are the same as the product name (case-insensitive)
+      if (trimmed.toLowerCase() === cleanedNameOnly.toLowerCase()) return false;
+      // Skip lines that start with the product name
+      if (cleanedNameOnly && trimmed.toLowerCase().startsWith(cleanedNameOnly.toLowerCase())) {
+        // Only skip if the remaining part is short (e.g. just punctuation or code)
+        const remaining = trimmed.substring(cleanedNameOnly.length).trim();
+        if (remaining.length < 5) return false;
+      }
+      return true;
+    });
+    const cleanedFullText = detailLines.join('\n');
 
     // Price extraction logic
     let finalPrice = product.price || '';
