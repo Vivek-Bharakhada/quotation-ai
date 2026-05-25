@@ -102,7 +102,7 @@ for _root in (PERSISTENT_IMAGES_DIR, STATIC_IMAGES_DIR, os.path.join(BUNDLED_DIR
 
 # Minimum file size (bytes) for a valid product image.
 # Images below this are icons, colour swatches, or small decorative elements from the PDF.
-_MIN_PRODUCT_IMAGE_SIZE = 8000
+_MIN_PRODUCT_IMAGE_SIZE = 1500
 SUPPORTED_BRANDS = {"aquant", "kohler"}
 
 _LEADING_CODE_WITH_VARIANT_RE = re.compile(
