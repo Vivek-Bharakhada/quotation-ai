@@ -136,10 +136,31 @@ def _resolve_item_image(base_dir, item):
     return ""
 
 def _build_item_description(item, styles):
+    import re
+    def strip_product_code(text: str) -> str:
+        val = str(text or "").strip()
+        if not val:
+            return ""
+        dash_index = val.find(" - ")
+        if dash_index > 0:
+            first_part = val[:dash_index].strip()
+            if any(c.isdigit() for c in first_part) and len(first_part) < 25:
+                val = val[dash_index + 3:].strip()
+        val = re.sub(r'\s*[\(\[]\s*K-[A-Z0-9\-]+\s*[\)\]]', '', val, flags=re.IGNORECASE)
+        val = re.sub(r'\s*[\(\[]\s*\d{4,}[A-Z0-9\-]*\s*[\)\]]', '', val, flags=re.IGNORECASE)
+        return val.strip()
+
     raw = str(item.get("rawText") or item.get("name") or "Unknown Item")
-    parts = [segment.strip() for segment in raw.split("\n") if segment.strip()]
-    name_str = str(item.get("name") or (parts[0] if parts else "Unknown Item")).strip() or "Unknown Item"
+    lines = [strip_product_code(line) for line in raw.split("\n")]
+    parts = [segment.strip() for segment in lines if segment.strip()]
+    
+    name_str = strip_product_code(str(item.get("name") or (parts[0] if parts else "Unknown Item"))).strip() or "Unknown Item"
     extra_lines = parts[1:] if len(parts) > 1 else []
+    
+    # Avoid duplicate name rendering on the second line if it is exactly identical
+    if extra_lines and extra_lines[0] == name_str:
+        extra_lines = extra_lines[1:]
+        
     extra_html = "<br/>".join(escape(line) for line in extra_lines)
     description_html = f"<b>{escape(name_str)}</b>"
     if extra_html:

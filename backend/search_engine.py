@@ -359,9 +359,24 @@ def _clean_variant_prices(variant_prices):
 
 
 def prepare_item_for_display(item):
+    import re
+    def strip_product_code(text: str) -> str:
+        val = str(text or "").strip()
+        if not val:
+            return ""
+        dash_index = val.find(" - ")
+        if dash_index > 0:
+            first_part = val[:dash_index].strip()
+            if any(c.isdigit() for c in first_part) and len(first_part) < 25:
+                val = val[dash_index + 3:].strip()
+        val = re.sub(r'\s*[\(\[]\s*K-[A-Z0-9\-]+\s*[\)\]]', '', val, flags=re.IGNORECASE)
+        val = re.sub(r'\s*[\(\[]\s*\d{4,}[A-Z0-9\-]*\s*[\)\]]', '', val, flags=re.IGNORECASE)
+        return val.strip()
+
     display_item = copy.deepcopy(item)
-    raw_name = _clean_display_text(display_item.get("name"))
-    raw_text = _clean_display_text(display_item.get("text"))
+    raw_name = strip_product_code(_clean_display_text(display_item.get("name")))
+    raw_text = "\n".join(strip_product_code(line) for line in _clean_display_text(display_item.get("text")).split("\n"))
+    
     display_name = raw_name
     display_code = display_item.get("search_code") or display_item.get("full_code") or display_item.get("base_code") or ""
     if raw_name and _looks_like_model_code(raw_name) and raw_text:
@@ -371,9 +386,11 @@ def prepare_item_for_display(item):
     elif not raw_name and raw_text:
         display_name = raw_text.splitlines()[0].strip()
 
+    display_name = strip_product_code(display_name)
+    display_item["name"] = display_name
+    display_item["text"] = raw_text
+
     for key in (
-        "name",
-        "text",
         "category",
         "brand",
         "source",
@@ -797,13 +814,22 @@ def _build_image_path_cache():
             for root, _, files in os.walk(img_root):
                 for filename in files:
                     stem = os.path.splitext(filename)[0]
-                    compact = _compact_alnum(stem)
-                    if not compact:
-                        continue
+                    stems = [stem]
+                    if "(" in stem:
+                        stems.append(stem.split("(")[0].strip())
+                    if "[" in stem:
+                        stems.append(stem.split("[")[0].strip())
+                    
                     rel_dir = os.path.relpath(root, img_root).replace("\\", "/")
                     rel_path = f"{filename}" if rel_dir == "." else f"{rel_dir}/{filename}"
                     public_path = f"/static/images/{rel_path}"
-                    cache.setdefault(compact, []).append(public_path)
+                    
+                    seen_compacts = set()
+                    for s_item in stems:
+                        compact = _compact_alnum(s_item)
+                        if compact and compact not in seen_compacts:
+                            seen_compacts.add(compact)
+                            cache.setdefault(compact, []).append(public_path)
 
     _image_path_cache = cache
     # Save newly built cache
