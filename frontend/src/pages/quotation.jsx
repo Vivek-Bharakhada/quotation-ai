@@ -322,7 +322,8 @@ export default function Quotation({ cart }) {
   const [client, setClient] = useState(blankClient);
   const [showGstInput, setShowGstInput] = useState(false);
   const [items, setItems] = useState(() => mapCartToItems(cart));
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [discountType, setDiscountType] = useState('percent'); // 'percent' or 'flat'
+  const [discountValue, setDiscountValue] = useState(0);
   const [gstRate, setGstRate] = useState(18);
   const [quoteHistory, setQuoteHistory] = useState(() => normalizeQuoteHistory(readJson(QUOTE_HISTORY_CACHE_KEY, [])));
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState(null);
@@ -400,7 +401,8 @@ export default function Quotation({ cart }) {
       client,
       showGstInput,
       items,
-      discountPercent,
+      discountType,
+      discountValue,
       gstRate,
       generatedPdfServerUrl,
       generatedPdfServerName,
@@ -415,7 +417,8 @@ export default function Quotation({ cart }) {
     client,
     showGstInput,
     items,
-    discountPercent,
+    discountType,
+    discountValue,
     gstRate,
     generatedPdfServerUrl,
     generatedPdfServerName,
@@ -483,7 +486,8 @@ export default function Quotation({ cart }) {
         address: data.address || '',
       });
       setItems(data.items && data.items.length > 0 ? data.items.map(sanitizeItem) : [createBlankItem()]);
-      setDiscountPercent(data.discount_percent || 0);
+      setDiscountType(data.discount_type || 'percent');
+      setDiscountValue(data.discount_type === 'flat' ? (data.discount_flat || 0) : (data.discount_percent || 0));
       setGstRate(data.gst_rate || 18);
       setShowGstInput(Boolean(data.gst));
       setGeneratedPdfUrl(null);
@@ -550,7 +554,8 @@ export default function Quotation({ cart }) {
     setClient(blankClient);
     setShowGstInput(false);
     setItems(mapCartToItems(cart));
-    setDiscountPercent(0);
+    setDiscountType('percent');
+    setDiscountValue(0);
     setGstRate(18);
     setGeneratedPdfUrl(null);
     setGeneratedPdfServerUrl('');
@@ -571,8 +576,15 @@ export default function Quotation({ cart }) {
     return sum + (total - (total * disc) / 100);
   }, 0);
 
-  const discountAmount = subtotal * (parseFloat(discountPercent || 0) / 100);
-  const taxableAmount = subtotal - discountAmount;
+  const discountAmount = discountType === 'flat' 
+    ? parseFloat(discountValue || 0) 
+    : subtotal * (parseFloat(discountValue || 0) / 100);
+
+  const discountPercent = subtotal > 0 
+    ? (discountAmount / subtotal) * 100 
+    : 0;
+
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
   const gstAmount = taxableAmount * (parseFloat(gstRate || 0) / 100);
   const grandTotal = taxableAmount + gstAmount;
   const quoteFilename = `Quotation_${(client.client_name || 'Client').replace(/\s+/g, '_')}.pdf`;
@@ -639,12 +651,17 @@ export default function Quotation({ cart }) {
       );
     });
     lines.push('');
-    lines.push(`Subtotal: ${formatMoney(subtotal)}`);
-    lines.push(`Discount: ${parseFloat(discountPercent || 0)}% (${formatMoney(discountAmount)})`);
+    lines.push(`Final Amount: ${formatMoney(subtotal)}`);
+    if (discountAmount > 0) {
+      lines.push(`Discount: ${parseFloat(discountPercent || 0).toFixed(2)}% (${formatMoney(discountAmount)})`);
+    }
     lines.push(`Taxable Amount: ${formatMoney(taxableAmount)}`);
-    lines.push(`GST (${parseFloat(gstRate || 0)}%): ${formatMoney(gstAmount)}`);
+    if (gstRate > 0) {
+      lines.push(`GST (${parseFloat(gstRate || 0)}%): ${formatMoney(gstAmount)}`);
+    }
     lines.push(`Grand Total: ${formatMoney(grandTotal)}`);
     return lines.join('\n');
+
   };
 
   const getPdfFile = async () => {
@@ -681,6 +698,8 @@ export default function Quotation({ cart }) {
       const payload = {
         ...client,
         items,
+        discount_type: discountType,
+        discount_flat: discountType === 'flat' ? parseFloat(discountValue || 0) : 0,
         discount_percent: parseFloat(discountPercent || 0),
         gst_rate: parseFloat(gstRate || 0),
         subtotal,
@@ -773,12 +792,13 @@ export default function Quotation({ cart }) {
         itemLines,
         ``,
         `💰 *FINANCIAL BREAKDOWN*`,
-        `Subtotal: ₹${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-        discountAmount > 0 ? `Discount (${discountPercent}%): -₹${discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
+        `Final Amount: ₹${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+        discountAmount > 0 ? `Discount (${discountPercent.toFixed(2)}%): -₹${discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
         `Taxable Amount: ₹${taxableAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-        gstAmount > 0 ? `GST (${gstRate}%): +₹${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
+        gstRate > 0 ? `GST (${gstRate}%): +₹${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
         ``,
         `*🎯 GRAND TOTAL: ₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}*`,
+
         ``,
         `📄 PDF: ${generatedPdfServerUrl}`,
         ``,
@@ -863,11 +883,12 @@ export default function Quotation({ cart }) {
           return `${i + 1}. ${item.name || `Item ${i + 1}`} | Qty: ${qty} | Rs ${price.toLocaleString('en-IN')} | Disc: ${disc}% | Total: Rs ${total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
         }),
         ``,
-        `Subtotal      : Rs ${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-        discountAmount > 0 ? `Discount (${discountPercent}%) : -Rs ${discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
+        `Final Amount  : Rs ${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+        discountAmount > 0 ? `Discount (${discountPercent.toFixed(2)}%) : -Rs ${discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
         `Taxable Amount: Rs ${taxableAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-        gstAmount > 0 ? `GST (${gstRate}%)    : +Rs ${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
+        gstRate > 0 ? `GST (${gstRate}%)    : +Rs ${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : null,
         `Grand Total   : Rs ${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+
         ``,
         pdfLink ? `Download PDF: ${pdfLink}` : null,
         ``,
@@ -1195,37 +1216,58 @@ export default function Quotation({ cart }) {
         <h4>Financial Summary</h4>
 
         <div className="qt-summary-row">
-          <span>Subtotal</span>
+          <span>Final Amount</span>
           <strong>Rs {subtotal.toFixed(2)}</strong>
         </div>
 
         <div className="qt-summary-row">
-          <span>Extra Discount (%)</span>
-          <input
-            className="qt-mini-input"
-            type="number"
-            min="0"
-            max="100"
-            value={discountPercent}
-            onChange={(e) => setDiscountPercent(e.target.value)}
-          />
+          <span>Extra Discount</span>
+          <div className="qt-discount-input-group">
+            <div className="qt-discount-toggle-buttons">
+              <button
+                type="button"
+                className={`qt-discount-toggle-btn ${discountType === 'percent' ? 'active' : ''}`}
+                onClick={() => setDiscountType('percent')}
+              >
+                Percentage
+              </button>
+              <button
+                type="button"
+                className={`qt-discount-toggle-btn ${discountType === 'flat' ? 'active' : ''}`}
+                onClick={() => setDiscountType('flat')}
+              >
+                MRP
+              </button>
+            </div>
+            <input
+              className="qt-mini-input"
+              type="number"
+              min="0"
+              value={discountValue}
+              onChange={(e) => setDiscountValue(e.target.value)}
+            />
+          </div>
         </div>
+
 
         <div className="qt-summary-row">
           <span>GST Rate (%)</span>
-          <select className="qt-mini-select" value={gstRate} onChange={(e) => setGstRate(e.target.value)}>
+          <select className="qt-mini-select" value={gstRate} onChange={(e) => setGstRate(parseFloat(e.target.value))}>
             {[0, 5, 12, 18, 28].map((r) => (
               <option key={r} value={r}>
-                {r}%
+                {r === 0 ? "None" : `${r}%`}
               </option>
             ))}
           </select>
         </div>
 
-        <div className="qt-summary-row gst">
-          <span>Estimated GST</span>
-          <strong>+ Rs {gstAmount.toFixed(2)}</strong>
-        </div>
+
+        {gstRate > 0 && (
+          <div className="qt-summary-row gst">
+            <span>Estimated GST</span>
+            <strong>+ Rs {gstAmount.toFixed(2)}</strong>
+          </div>
+        )}
 
         <div className="qt-total-row">
           <span>Grand Total</span>

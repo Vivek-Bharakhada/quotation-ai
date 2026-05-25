@@ -174,6 +174,8 @@ def generate_quote(data):
     made_by       = str(data.get("made_by") or "").strip()
     made_by_phone = str(data.get("made_by_phone") or "").strip()
     items         = data.get("items", [])
+    discount_type = data.get("discount_type", "percent")
+    discount_flat = _to_float(data.get("discount_flat", 0))
     discount_percent = _to_float(data.get("discount_percent", 0))
     gst_rate      = _to_float(data.get("gst_rate", 0))
     output_path   = str(data.get("output_path") or "quotation.pdf").strip() or "quotation.pdf"
@@ -265,10 +267,7 @@ def generate_quote(data):
             fontSize=9, fontName='Helvetica-Bold',
             textColor=colors.white, alignment=1, leading=13)
         
-        addr_text = "Opp. Indrapuri Atithi Gruh, Waghodia Road, Vadodara - 390019"
-        if made_by:
-            prepared_by_str = f"Prepared By: {made_by} - {made_by_phone}" if made_by_phone else f"Prepared By: {made_by}"
-            addr_text += f"   |   {prepared_by_str}"
+        addr_text = "Opp. Indrapuri Atithi Gruh, Waghodia Road, Vadodara - 390019   |   Ph: +91 8735044244"
 
         addr_table = Table(
             [[Paragraph(addr_text, addr_style)]],
@@ -289,6 +288,8 @@ def generate_quote(data):
         meta_style = ParagraphStyle('MS', parent=styles['Normal'], fontSize=8.5, fontName='Helvetica-Bold', alignment=2, leading=11)
         quote_id = quote_number if quote_number else f"SC-{today_str.replace(' ', '')}"
         meta_text = [f"<b>No:</b> {quote_id}", f"<b>Date:</b> {today_str}"]
+        if made_by:
+            meta_text.append(f"<b>Prepared By: {made_by} - {made_by_phone}</b>" if made_by_phone else f"<b>Prepared By: {made_by}</b>")
         
         meta_para = Paragraph("<br/>".join(meta_text), meta_style)
         
@@ -363,17 +364,32 @@ def generate_quote(data):
         for section in room_sections:
             elements.append(Paragraph(section["name"], section_heading_style))
 
-            section_rows = [[
-                "#",
-                "IMG",
-                "Item Details",
-                "SKU",
-                "Size",
-                "Qty",
-                "Rate",
-                "Disc %",
-                "Amount",
-            ]]
+            show_disc_col = not (discount_percent > 0 or discount_flat > 0)
+            if show_disc_col:
+                section_rows = [[
+                    "#",
+                    "IMG",
+                    "Item Details",
+                    "SKU",
+                    "Size",
+                    "Qty",
+                    "Rate",
+                    "Disc %",
+                    "Amount",
+                ]]
+                col_widths = [20, 62, 158, 48, 50, 30, 58, 39, 67]
+            else:
+                section_rows = [[
+                    "#",
+                    "IMG",
+                    "Item Details",
+                    "SKU",
+                    "Size",
+                    "Qty",
+                    "Rate",
+                    "Amount",
+                ]]
+                col_widths = [20, 62, 197, 48, 50, 30, 58, 67]
 
             for item_index, item in enumerate(section["items"], start=1):
                 qty = _safe_quantity(item.get("quantity"), 1.0)
@@ -381,7 +397,7 @@ def generate_quote(data):
                 disc = _to_float(item.get("discount"), 0.0)
                 amount = _line_total(item)
 
-                section_rows.append([
+                row_cells = [
                     str(item_index),
                     _resolve_item_image(base_dir, item),
                     _build_item_description(item, styles),
@@ -389,31 +405,32 @@ def generate_quote(data):
                     Paragraph(escape(str(item.get("size") or "-")), section_cell_style),
                     Paragraph(escape(_format_quantity(qty)), section_cell_style),
                     Paragraph(escape(f"Rs. {price:,.2f}"), section_cell_style),
-                    Paragraph(escape(f"{disc:g}%"), section_cell_style),
+                ]
+                if show_disc_col:
+                    row_cells.append(Paragraph(escape(f"{disc:g}%"), section_cell_style))
+                row_cells.append(
                     Paragraph(
                         escape(f"Rs. {amount:,.2f}"),
                         ParagraphStyle('AmountCell', parent=section_cell_style, fontName='Helvetica-Bold', alignment=2)
-                    ),
-                ])
+                    )
+                )
+                section_rows.append(row_cells)
 
-            section_rows.append([
-                Paragraph("<b>TOTAL</b>", section_cell_style),
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
+            total_cells = [Paragraph("<b>TOTAL</b>", section_cell_style)]
+            num_cols = len(section_rows[0])
+            for _ in range(num_cols - 2):
+                total_cells.append("")
+            total_cells.append(
                 Paragraph(
                     f"<b>Rs. {section['display_total']:,.2f}</b>",
                     ParagraphStyle('SectionTotal', parent=section_cell_style, fontName='Helvetica-Bold', alignment=2)
-                ),
-            ])
+                )
+            )
+            section_rows.append(total_cells)
 
             section_table = Table(
                 section_rows,
-                colWidths=[20, 62, 158, 48, 50, 30, 58, 39, 67],
+                colWidths=col_widths,
                 repeatRows=1,
             )
 
@@ -426,27 +443,28 @@ def generate_quote(data):
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (2, 1), (4, last_row_index - 1), 'LEFT'),
-                ('ALIGN', (5, 1), (7, last_row_index - 1), 'CENTER'),
-                ('ALIGN', (8, 1), (8, last_row_index), 'RIGHT'),
+                ('ALIGN', (5, 1), (6 if not show_disc_col else 7, last_row_index - 1), 'CENTER'),
+                ('ALIGN', (-1, 1), (-1, last_row_index), 'RIGHT'),
                 ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dee8")),
                 ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.HexColor("#d7dee8")),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('SPAN', (0, last_row_index), (7, last_row_index)),
+                ('SPAN', (0, last_row_index), (-2, last_row_index)),
                 ('BACKGROUND', (0, last_row_index), (-1, last_row_index), colors.white),
             ]))
+
 
             elements.append(section_table)
             elements.append(Spacer(1, 12))
 
-        overall_totals = [["Subtotal", f"Rs. {subtotal:,.2f}"]]
+        overall_totals = [["Final Amount", f"Rs. {subtotal:,.2f}"]]
         if discount_percent > 0:
             discount_amount = subtotal - (grand - gst_amt)
             overall_totals.append([f"Discount ({discount_percent:g}%)", f"- Rs. {discount_amount:,.2f}"])
-        overall_totals.extend([
-            [f"GST ({gst_rate:g}%)", f"Rs. {gst_amt:,.2f}"],
-            ["Grand Total", f"Rs. {grand:,.2f}"],
-        ])
+        if gst_rate > 0:
+            overall_totals.append([f"GST ({gst_rate:g}%)", f"Rs. {gst_amt:,.2f}"])
+        overall_totals.append(["Grand Total", f"Rs. {grand:,.2f}"])
+
 
         overall_totals_table = Table(overall_totals, colWidths=[140, 120], hAlign='RIGHT')
         overall_totals_table.setStyle(TableStyle([
@@ -463,7 +481,14 @@ def generate_quote(data):
         elements.append(overall_totals_table)
         elements.append(Spacer(1, 18))
     else:
-        header_row = ["S.No", "Image", "Item Description", "Qty", "Price", "Disc(%)", "Amount"]
+        show_disc_col = not (discount_percent > 0 or discount_flat > 0)
+        if show_disc_col:
+            header_row = ["S.No", "Image", "Item Description", "Qty", "Price", "Disc(%)", "Amount"]
+            col_widths = [30, 60, 230, 45, 65, 45, 75]
+        else:
+            header_row = ["S.No", "Image", "Item Description", "Qty", "Price", "Amount"]
+            col_widths = [30, 60, 275, 45, 65, 75]
+
         table_data = [header_row]
         
         for idx, item in enumerate(items):
@@ -472,21 +497,32 @@ def generate_quote(data):
             disc = _to_float(item.get("discount"), 0.0)
             amount = _line_total(item)
             
-            table_data.append([
+            row = [
                 str(idx + 1),
                 _resolve_item_image(base_dir, item),
                 _build_item_description(item, styles),
                 _format_quantity(qty),
                 f"{price:,.2f}",
-                f"{disc:g}%" if disc > 0 else "-",
-                f"{amount:,.2f}",
-            ])
+            ]
+            if show_disc_col:
+                row.append(f"{disc:g}%" if disc > 0 else "-")
+            row.append(f"{amount:,.2f}")
+            table_data.append(row)
 
-        table_data.append(["", "", "", "Subtotal:", f"Rs {subtotal:,.2f}", "", ""])
-        table_data.append(["", "", "", f"GST ({gst_rate:g}%):", f"+ Rs {gst_amt:,.2f}", "", ""])
-        table_data.append(["", "", "", "Grand Total:", f"Rs {grand:,.2f}", "", ""])
+        num_cols = len(header_row)
+        def build_footer_row(label, val):
+            frow = []
+            for _ in range(num_cols - 4):
+                frow.append("")
+            frow.extend([label, val, "", ""])
+            return frow
 
-        t = Table(table_data, colWidths=[30, 60, 230, 45, 65, 45, 75])
+        table_data.append(build_footer_row("Final Amount:", f"Rs {subtotal:,.2f}"))
+        if gst_rate > 0:
+            table_data.append(build_footer_row(f"GST ({gst_rate:g}%):", f"+ Rs {gst_amt:,.2f}"))
+        table_data.append(build_footer_row("Grand Total:", f"Rs {grand:,.2f}"))
+
+        t = Table(table_data, colWidths=col_widths)
         t_style = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -499,18 +535,21 @@ def generate_quote(data):
         ])
         
         n_items = len(items)
+        label_col = num_cols - 4
+        val_col = num_cols - 3
         for r in range(n_items + 1, len(table_data)):
-            t_style.add('SPAN', (0, r), (2, r))
-            t_style.add('SPAN', (4, r), (6, r))
-            t_style.add('ALIGN', (3, r), (3, r), 'RIGHT')
-            t_style.add('ALIGN', (4, r), (4, r), 'RIGHT')
-            t_style.add('FONTNAME', (3, r), (-1, r), 'Helvetica-Bold')
+            t_style.add('SPAN', (0, r), (label_col - 1, r))
+            t_style.add('SPAN', (val_col, r), (-1, r))
+            t_style.add('ALIGN', (label_col, r), (label_col, r), 'RIGHT')
+            t_style.add('ALIGN', (val_col, r), (val_col, r), 'RIGHT')
+            t_style.add('FONTNAME', (label_col, r), (-1, r), 'Helvetica-Bold')
             t_style.add('BACKGROUND', (0, r), (-1, r), colors.white)
             
-        t_style.add('TEXTCOLOR', (4, -1), (-1, -1), colors.HexColor("#0284c7"))
+        t_style.add('TEXTCOLOR', (val_col, -1), (-1, -1), colors.HexColor("#0284c7"))
         t.setStyle(t_style)
         elements.append(t)
         elements.append(Spacer(1, 18))
+
 
     if show_bg_logo:
         # Room summary shown above Terms & Conditions in branded PDF.
@@ -563,15 +602,17 @@ def generate_quote(data):
                     Paragraph(f"Rs. {section['taxable_total']:,.2f}", room_summary_value),
                 ])
 
-            gst_label = f"GST ({gst_rate:g}%)" if gst_rate else "GST"
-            room_summary_data.append([
-                Paragraph(gst_label, room_summary_label),
-                Paragraph(f"Rs. {gst_amt:,.2f}", room_summary_value),
-            ])
+            if gst_rate > 0:
+                gst_label = f"GST ({gst_rate:g}%)"
+                room_summary_data.append([
+                    Paragraph(gst_label, room_summary_label),
+                    Paragraph(f"Rs. {gst_amt:,.2f}", room_summary_value),
+                ])
             room_summary_data.append([
                 Paragraph("FINAL AMOUNT", room_summary_final_label),
                 Paragraph(f"Rs. {grand:,.2f}", room_summary_final_value),
             ])
+
 
             room_summary_table = Table(room_summary_data, colWidths=[410, 125])
             room_summary_table.setStyle(TableStyle([
@@ -613,7 +654,10 @@ def generate_quote(data):
         ]
         
         # ── Professional Stamp Image ──────────────────────────────────────
-        stamp_path = os.path.join(base_dir, "static", "stamp_seal.png")
+        stamp_path = os.path.join(base_dir, "static", "stamp.png")
+        if not os.path.exists(stamp_path):
+            stamp_path = os.path.join(base_dir, "static", "stamp_seal.png")
+
         if os.path.exists(stamp_path):
             stamp_img = RLImage(stamp_path, width=115, height=115, kind='bound')
         else:
@@ -627,7 +671,8 @@ def generate_quote(data):
         foot_table.setStyle(TableStyle([
             ('VALIGN',  (0,0), (-1,-1), 'MIDDLE'),
             ('LEFTPADDING', (0,0), (-1,-1), 0),
-            ('ALIGN', (1,0), (1,0), 'CENTER'),
+            ('RIGHTPADDING', (1,0), (1,0), 0),
+            ('ALIGN', (1,0), (1,0), 'RIGHT'),
         ]))
         elements.append(foot_table)
 

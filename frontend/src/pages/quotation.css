@@ -1245,3 +1245,40 @@
     grid-template-columns: 1fr;
   }
 }
+
+.qt-discount-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qt-discount-toggle-buttons {
+  display: flex;
+  border: 1px solid rgba(148, 163, 184, 0.46);
+  border-radius: 0.66rem;
+  overflow: hidden;
+  background: rgba(2, 6, 23, 0.32);
+  padding: 2px;
+}
+
+.qt-discount-toggle-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  border-radius: 0.45rem;
+  transition: all 0.2s;
+}
+
+.qt-discount-toggle-btn.active {
+  background: var(--primary-color, #be1e2d);
+  color: #ffffff;
+}
+
+.qt-discount-toggle-btn:hover:not(.active) {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+}
