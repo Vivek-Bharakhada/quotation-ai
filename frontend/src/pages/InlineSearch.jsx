@@ -43,67 +43,74 @@ const stripProductCode = (text = '') => {
 };
 
 
-function SuggestionThumbnail({ suggestion, product }) {
-  const [failedPrimary, setFailedPrimary] = useState(false);
-  const [failedFallback, setFailedFallback] = useState(false);
-
-  const candidateImage = resolveSuggestionImage(product || {}, suggestion || {});
-  const brand = String(product?.brand || suggestion?.brand || '').trim();
-  const fallbackImage = BRAND_FALLBACK_IMAGES[brand] || '/hero.png';
-  const primarySrc = candidateImage ? resolveAssetUrl(candidateImage) : '';
-  const fallbackSrc = resolveAssetUrl(fallbackImage);
-  const isPlaceholder = String(candidateImage || '').includes('Image_Not_Found') || String(candidateImage || '').includes('Image not Found');
-  const showPrimary = primarySrc && !isPlaceholder && !failedPrimary;
-  const showFallback = !showPrimary && fallbackSrc && !failedFallback;
-
-  if (showPrimary) {
-    return (
-      <img
-        src={primarySrc}
-        alt=""
-        onError={() => setFailedPrimary(true)}
-        style={{
-          width: '52px',
-          height: '52px',
-          objectFit: 'contain',
-          background: '#ffffff',
-          borderRadius: '10px',
-          padding: '4px',
-          flexShrink: 0,
-        }}
-      />
-    );
-  }
-
-  if (showFallback) {
-    return (
-      <img
-        src={fallbackSrc}
-        alt=""
-        onError={() => setFailedFallback(true)}
-        style={{
-          width: '52px',
-          height: '52px',
-          objectFit: 'cover',
-          background: 'rgba(95, 99, 104, 0.08)',
-          borderRadius: '10px',
-          padding: '4px',
-          flexShrink: 0,
-          border: '1px solid rgba(95, 99, 104, 0.16)',
-        }}
-      />
-    );
-  }
-
+function ImageNotFoundBox() {
   return (
     <div
-      aria-hidden="true"
+      title="Image Not Found"
       style={{
         width: '52px',
         height: '52px',
         borderRadius: '10px',
-        border: '1px solid rgba(95, 99, 104, 0.16)',
-        background: 'linear-gradient(135deg, rgba(95, 99, 104, 0.10), rgba(95, 99, 104, 0.04))',
+        border: '1px dashed rgba(248, 113, 113, 0.45)',
+        background: 'rgba(248, 113, 113, 0.07)',
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '2px',
+      }}
+    >
+      <span style={{ fontSize: '16px', lineHeight: 1 }}>🚫</span>
+      <span
+        style={{
+          fontSize: '7px',
+          fontWeight: 800,
+          color: 'rgba(248, 113, 113, 0.9)',
+          textAlign: 'center',
+          lineHeight: 1.2,
+          letterSpacing: '0.02em',
+          textTransform: 'uppercase',
+        }}
+      >
+        No Image
+      </span>
+    </div>
+  );
+}
+
+function SuggestionThumbnail({ suggestion, product }) {
+  const [failedPrimary, setFailedPrimary] = useState(false);
+
+  const candidateImage = resolveSuggestionImage(product || {}, suggestion || {});
+  const isPlaceholder =
+    String(candidateImage || '').toLowerCase().includes('image_not_found') ||
+    String(candidateImage || '').toLowerCase().includes('image not found');
+
+  // No image URL at all, or it is a known placeholder → show "No Image" box immediately
+  if (!candidateImage || isPlaceholder) {
+    return <ImageNotFoundBox />;
+  }
+
+  const primarySrc = resolveAssetUrl(candidateImage);
+
+  // Image URL exists but failed to load → show "No Image" box
+  if (failedPrimary) {
+    return <ImageNotFoundBox />;
+  }
+
+  return (
+    <img
+      src={primarySrc}
+      alt=""
+      onError={() => setFailedPrimary(true)}
+      style={{
+        width: '52px',
+        height: '52px',
+        objectFit: 'contain',
+        background: '#ffffff',
+        borderRadius: '10px',
+        padding: '4px',
         flexShrink: 0,
       }}
     />
@@ -130,12 +137,15 @@ function resolveSuggestionImage(product = {}, suggestion = {}) {
 
   const productImage = (product.images && product.images[0]) || '';
   const suggestionImage = suggestion.image || '';
-  const brand = String(product.brand || suggestion.brand || '').trim();
-  const fallbackImage = BRAND_FALLBACK_IMAGES[brand] || '';
-  const isPlaceholder = (value) => String(value || '').includes('Image_Not_Found') || String(value || '').includes('Image not Found');
+
+  const isPlaceholder = (value) =>
+    String(value || '').toLowerCase().includes('image_not_found') ||
+    String(value || '').toLowerCase().includes('image not found');
+
+  // Only return a non-placeholder image — never fall back to brand cover
   if (productImage && !isPlaceholder(productImage)) return productImage;
   if (suggestionImage && !isPlaceholder(suggestionImage)) return suggestionImage;
-  return productImage || suggestionImage || fallbackImage || '';
+  return ''; // No real image → frontend will show "No Image" box
 }
 
 export default function InlineSearch({ onAdd, disabled = false }) {
@@ -467,9 +477,10 @@ export default function InlineSearch({ onAdd, disabled = false }) {
                 lineHeight: 1.35,
                 whiteSpace: 'normal',
                 overflowWrap: 'anywhere',
+                fontSize: '1rem',
               }}
             >
-              {sanitizeDisplayText(s.display_name || s.full_name || s.description || s.text || 'Product')}
+              {sanitizeDisplayText(s.display_code || s.text || 'Product')}
             </div>
             <div
               style={{
@@ -481,11 +492,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
                 overflowWrap: 'anywhere',
               }}
             >
-              {s.text
-                ? (s.display_code && s.display_code !== s.text
-                    ? `Code: ${sanitizeDisplayText(s.text)}`
-                    : sanitizeDisplayText(s.description || s.text))
-                : sanitizeDisplayText(s.description || s.full_name)}
+              {sanitizeDisplayText(s.description || stripProductCode(s.display_name || s.full_name))}
             </div>
           </div>
 

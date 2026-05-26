@@ -390,11 +390,30 @@ def prepare_item_for_display(item):
     if "variant_prices" in display_item:
         display_item["variant_prices"] = _clean_variant_prices(display_item.get("variant_prices"))
 
-    best_image = _best_item_image(item)
-    if best_image:
-        display_item["images"] = [best_image]
-    elif display_item.get("images"):
-        display_item["images"] = [img for img in display_item.get("images", []) if img]
+    # Check if this product is a hard-placeholder (no real image ever assigned)
+    _code_meta_disp = _get_item_code_metadata(item)
+    _is_placeholder_code = any(
+        c in HARD_PLACEHOLDER_CODES
+        for c in (
+            _code_meta_disp.get("full_code", ""),
+            _code_meta_disp.get("base_code", ""),
+            str(item.get("search_code", "")),
+        )
+        if c
+    )
+    if _is_placeholder_code:
+        display_item["images"] = []
+    else:
+        best_image = _best_item_image(item)
+        if best_image:
+            display_item["images"] = [best_image]
+        else:
+            # Only keep image paths that actually exist on disk
+            verified = [
+                img for img in (display_item.get("images") or [])
+                if img and _resolve_local_image_path(img)
+            ]
+            display_item["images"] = verified
 
     # Normalize a few Aquant ceiling-shower variants whose OCR'd finish labels
     # can include an extra color that should not be shown in the UI.
@@ -1675,6 +1694,9 @@ def _items_to_suggestion_payload(items, limit: int = 50):
             continue
         seen.add(dedupe_key)
 
+        best_img = _best_item_image(item)
+        # Raw item already has images stripped/verified by prepare_item_for_display;
+        # mirror that here so the top-level 'image' field is consistent.
         final_results.append({
             "text": code,
             "description": description,
@@ -1682,7 +1704,7 @@ def _items_to_suggestion_payload(items, limit: int = 50):
             "display_name": display_item.get("display_name") or full_name,
             "display_code": display_item.get("display_code") or code,
             "brand": _clean_display_text(item.get("brand", "Aquant")),
-            "image": _best_item_image(item),
+            "image": best_img if best_img else None,
             "price": item.get("price"),
             "raw_item": display_item,
         })
