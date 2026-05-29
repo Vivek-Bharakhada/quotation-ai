@@ -1,4 +1,6 @@
 print("--- BACKEND STARTING ---")
+from dotenv import load_dotenv
+load_dotenv()
 print("Importing FastAPI...")
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
@@ -16,6 +18,7 @@ print("Importing custom modules...")
 from pdf_reader import extract_content, chunk_content
 import search_engine
 import cloud_storage
+import mongodb
 from email_service import send_email_with_attachment
 from quotation import generate_quote
 from app_paths import resolve_data_dir
@@ -27,15 +30,10 @@ app = FastAPI()
 
 import sys
 is_frozen = getattr(sys, 'frozen', False)
-# For bundled sidecar, we look for assets next to the .exe (sys.executable)
-# For dev, we look next to the script (__file__)
 EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else os.path.dirname(os.path.abspath(__file__))
 _MEIPASS = getattr(sys, '_MEIPASS', EXE_DIR)
-
-# BUNDLED_DIR is for read-only assets like the initial index
 BUNDLED_DIR = _MEIPASS
 if is_frozen:
-    # Handle PyInstaller 6+ --contents-directory layout
     possible_internal = os.path.join(_MEIPASS, "_internal")
     if os.path.isdir(possible_internal):
         BUNDLED_DIR = possible_internal
@@ -353,7 +351,165 @@ def _sync_cloud_catalogs_to_local():
     except Exception as e:
         print(f"Warning: failed to sync cloud catalogs locally: {e}")
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, str(default))).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+def _normalize_whatsapp_number(raw_number: str) -> str:
+    digits = "".join(ch for ch in str(raw_number or "") if ch.isdigit())
+    if len(digits) == 10:
+        return f"91{digits}"
+    if len(digits) == 11 and digits.startswith("0"):
+        return f"91{digits[1:]}"
+    if len(digits) >= 12 and digits.startswith("91"):
+        return digits
+    return digits
+
+def _sanitize_filename(value: str, fallback: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._")
+    return cleaned or fallback
+
+def _parse_cloud_timestamp(raw_value):
+    if not raw_value:
+        return time.time()
+    text = str(raw_value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return time.time()
+
+def _read_remote_bytes(url: str) -> bytes:
+    try:
+        response = httpx.get(url, timeout=60)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch remote file: {e}")
+
+    if not response.is_success:
+        raise HTTPException(status_code=404, detail="Remote file not found")
+
+    return response.content
+
+def _resolve_static_pdf_path(pdf_url: str):
+    if not pdf_url:
+        raise HTTPException(status_code=400, detail="Missing pdf_url")
+
+    parsed = urlparse(pdf_url)
+    raw_path = parsed.path if parsed.scheme else str(pdf_url)
+    if not raw_path.startswith("/static/"):
+        raise HTTPException(status_code=400, detail="pdf_url must point to /static/*")
+
+    rel_path = raw_path.lstrip("/")
+    static_root = os.path.abspath(STATIC_DIR)
+    abs_path = os.path.abspath(os.path.normpath(os.path.join(BASE_DIR, rel_path)))
+
+    # Prevent path traversal outside static folder.
+    if not abs_path.startswith(static_root):
+        raise HTTPException(status_code=400, detail="Invalid pdf_url path")
+
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="PDF file not found on server")
+
+    return abs_path, os.path.basename(abs_path), raw_path
+
+def _load_pdf_bytes(pdf_url: str, requested_name: str = ""):
+    if cloud_storage.is_absolute_url(pdf_url):
+        parsed = urlparse(pdf_url)
+        detected_name = os.path.basename(parsed.path) or "quotation.pdf"
+        return _read_remote_bytes(pdf_url), requested_name or detected_name
+
+    pdf_path, detected_name, _ = _resolve_static_pdf_path(pdf_url)
+    with open(pdf_path, "rb") as handle:
+        return handle.read(), requested_name or detected_name
+
+
+def _list_local_catalog_files():
+    if not os.path.exists(UPLOAD_DIR):
+        return []
+
+    file_details = []
+    for filename in os.listdir(UPLOAD_DIR):
+        if not filename.lower().endswith(".pdf"):
+            continue
+
+        path = os.path.join(UPLOAD_DIR, filename)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+
+        file_details.append({
+            "name": filename,
+            "size": round(stat.st_size / (1024 * 1024), 2),
+            "date": stat.st_mtime,
+        })
+
+    file_details.sort(key=lambda item: item["date"], reverse=True)
+    return file_details
+
+def _sync_cloud_catalogs_to_local():
+    if not cloud_storage.is_enabled():
+        return
+
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        local_names = {
+            filename
+            for filename in os.listdir(UPLOAD_DIR)
+            if filename.lower().endswith(".pdf")
+        }
+        remote_entries = [
+            entry for entry in cloud_storage.list_objects(cloud_storage.CATALOGS_BUCKET)
+            if str(entry.get("name") or "").lower().endswith(".pdf")
+        ]
+        remote_names = set()
+        for entry in remote_entries:
+            filename = str(entry.get("name") or "").strip()
+            if not filename:
+                continue
+
+            remote_names.add(filename)
+            local_path = os.path.join(UPLOAD_DIR, filename)
+            if not os.path.exists(local_path):
+                cloud_storage.download_to_path(cloud_storage.CATALOGS_BUCKET, filename, local_path)
+
+        # Bootstrap bundled/local catalogs into cloud if the bucket is empty
+        # or if the deployment still has seed PDFs that are not yet synced.
+        for filename in sorted(local_names):
+            if filename in remote_names:
+                continue
+            local_path = os.path.join(UPLOAD_DIR, filename)
+            try:
+                cloud_storage.upload_file(
+                    cloud_storage.CATALOGS_BUCKET,
+                    filename,
+                    local_path,
+                    "application/pdf",
+                )
+                remote_names.add(filename)
+            except Exception as e:
+                print(f"Warning: failed to bootstrap catalog '{filename}' to cloud: {e}")
+
+        # Only delete local PDFs when cloud has a non-empty authoritative list.
+        for filename in os.listdir(UPLOAD_DIR):
+            if (
+                remote_names
+                and filename.lower().endswith(".pdf")
+                and filename not in remote_names
+            ):
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, filename))
+                except OSError:
+                    pass
+    except Exception as e:
+        print(f"Warning: failed to sync cloud catalogs locally: {e}")
+
 def _save_quote_record(filename: str, data: dict):
+    if mongodb.is_enabled():
+        try:
+            mongodb.save_quote(filename, data)
+        except Exception as e:
+            print(f"Warning: failed to save to MongoDB: {e}")
+
     os.makedirs(QUOTES_HISTORY_DIR, exist_ok=True)
     local_path = os.path.join(QUOTES_HISTORY_DIR, filename)
     with open(local_path, "w", encoding="utf-8") as handle:
@@ -371,6 +527,12 @@ def _save_quote_record(filename: str, data: dict):
             print(f"Warning: failed to sync quote history to cloud: {e}")
 
 def _list_quote_records():
+    if mongodb.is_enabled():
+        try:
+            return mongodb.list_quotes()
+        except Exception as e:
+            print(f"Warning: failed to list MongoDB quotes: {e}")
+
     if cloud_storage.is_enabled():
         try:
             details = []
@@ -421,6 +583,14 @@ def _list_quote_records():
     return details
 
 def _load_quote_record(quote_id: str):
+    if mongodb.is_enabled():
+        try:
+            doc = mongodb.load_quote(quote_id)
+            if doc is not None:
+                return doc
+        except Exception as e:
+            print(f"Warning: failed to load from MongoDB: {e}")
+
     if cloud_storage.is_enabled():
         try:
             raw = cloud_storage.download_bytes(cloud_storage.QUOTE_HISTORY_BUCKET, quote_id)
@@ -437,6 +607,12 @@ def _load_quote_record(quote_id: str):
 
 def _delete_quote_record(quote_id: str) -> bool:
     deleted = False
+    if mongodb.is_enabled():
+        try:
+            deleted = mongodb.delete_quote(quote_id)
+        except Exception as e:
+            print(f"Warning: failed to delete from MongoDB: {e}")
+
     path = os.path.join(QUOTES_HISTORY_DIR, quote_id)
     if os.path.exists(path):
         os.remove(path)

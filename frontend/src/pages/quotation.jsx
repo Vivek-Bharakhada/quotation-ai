@@ -110,10 +110,76 @@ const normalizeItemImage = (item = {}) => {
   return primary || secondary || BRAND_FALLBACK_IMAGES[brand] || null;
 };
 
+const formatDisplayDescription = (rawText = '', sku = '') => {
+  if (!rawText) return '';
+
+  const cleanSku = String(sku || '').trim();
+  const norm = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normSku = norm(cleanSku);
+
+  const lines = String(rawText).split('\n');
+  const cleanLines = [];
+
+  for (let line of lines) {
+    let trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Skip line if it is exactly the SKU
+    if (norm(trimmed) === normSku) continue;
+
+    // Remove price/MRP patterns
+    trimmed = trimmed.replace(/mrp\s*(?:rs\.?|rs|INR|₹)?\s*[\d,\s`\/\-]*/gi, '');
+    trimmed = trimmed.replace(/(?:rs\.?|rs|INR|₹)\s*[\d,\s`\/\-]*/gi, '');
+    trimmed = trimmed.replace(/price\s*[\d,\s`\/\-]*/gi, '');
+
+    // Remove the product's SKU if present in the text
+    if (cleanSku) {
+      const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const skuRegex = new RegExp(escapeRegExp(cleanSku), 'gi');
+      trimmed = trimmed.replace(skuRegex, '');
+    }
+
+    // Remove general model code patterns
+    trimmed = trimmed.replace(/\bK-\d+[A-Z0-9\-]*\b/gi, '');
+    trimmed = trimmed.replace(/\b\d{4,5}[A-Z]{0,2}\b/gi, '');
+
+    // Clean up remaining punctuation and multiple spaces
+    trimmed = trimmed.replace(/[\s\-\,\.\(\[\)\]\+\/]+$/, ''); // clean trailing punctuation
+    trimmed = trimmed.replace(/^[\s\-\,\.\(\[\)\]\+\/]+/, ''); // clean leading punctuation
+    trimmed = trimmed.replace(/\s+/g, ' ').trim();
+
+    // Skip if line became empty or too short (e.g. just a few characters/leftover punctuation)
+    if (trimmed.length < 3) continue;
+
+    // Avoid duplicate lines in description
+    if (!cleanLines.includes(trimmed)) {
+      cleanLines.push(trimmed);
+    }
+  }
+
+  return cleanLines.join('\n');
+};
+
 const sanitizeItem = (item = {}) => {
   const image = normalizeItemImage(item);
+  const sku = String(item.sku || '').trim();
+  let name = String(item.name || '').trim();
+
+  if (sku && name) {
+    const norm = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normSku = norm(sku);
+    const normName = norm(name);
+    if (normName === normSku || normSku.includes(normName) || normName.includes(normSku)) {
+      name = '';
+    }
+  }
+
+  const rawText = formatDisplayDescription(item.rawText || '', sku);
+
   return {
     ...item,
+    name,
+    rawText,
     image,
     raw_item: item.raw_item
       ? {

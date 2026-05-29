@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import copy
 import json
 import os
@@ -23,6 +25,7 @@ if is_frozen:
 
 import numpy as np
 import cloud_storage
+import mongodb
 from app_paths import resolve_data_dir
 
 DATA_DIR = resolve_data_dir(is_frozen, EXE_DIR)
@@ -676,7 +679,21 @@ def load_index(force: bool = False):
         except Exception as e:
             print(f"Warning: failed to restore index from cloud storage: {e}")
 
-    if os.path.exists(index_file):
+    # Check if MongoDB is enabled and has the search index in cloud
+    loaded_from_mongo = False
+    if mongodb.is_enabled():
+        try:
+            mongo_data = mongodb.load_search_index()
+            if mongo_data:
+                stored_items = mongo_data.get("stored_items", [])
+                keyword_index = mongo_data.get("keyword_index", {})
+                print(f"Index loaded dynamically: {len(stored_items)} items loaded from MongoDB Cloud!")
+                _index_cache_signature = "mongodb"
+                loaded_from_mongo = True
+        except Exception as e:
+            print(f"Warning: Failed to load search index from MongoDB: {e}")
+
+    if not loaded_from_mongo and os.path.exists(index_file):
         try:
             signature = (index_file, os.path.getmtime(index_file), os.path.getsize(index_file))
             if not force and stored_items and _index_cache_signature == signature:
@@ -688,6 +705,13 @@ def load_index(force: bool = False):
                 keyword_index = data.get("keyword_index", {})
             print(f"Index loaded: {len(stored_items)} items from {index_file}")
             _index_cache_signature = signature
+
+            # Auto-seed MongoDB if enabled but empty
+            if mongodb.is_enabled():
+                try:
+                    mongodb.save_search_index(data)
+                except Exception as e:
+                    print(f"Warning: Failed to seed MongoDB: {e}")
 
             if not stored_items:
                 print("Loaded index is empty; treating it as missing so the catalog can rebuild.")

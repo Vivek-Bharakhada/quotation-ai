@@ -299,6 +299,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
 
     // Pick full data from raw_item (now provided by backend)
     const product = s.raw_item || {};
+    const sku = sanitizeDisplayText(product.sku || s.text || '').trim();
     const fullText = sanitizeDisplayText(
       product.display_text || product.text || s.full_name || s.description || s.text || ''
     );
@@ -307,26 +308,55 @@ export default function InlineSearch({ onAdd, disabled = false }) {
       product.display_name || product.name || firstLine || s.full_name || s.description || s.text || 'Product'
     );
 
-    const cleanedNameOnly = stripProductCode(nameOnly);
-    const lines = fullText.split('\n');
-    if (lines.length > 0) {
-      lines[0] = stripProductCode(lines[0]);
-    }
-    // Strip out product name from description — keep only product details/specs
-    const detailLines = lines.filter((line, idx) => {
-      const trimmed = line.trim();
-      if (!trimmed) return false; // skip empty lines
-      // Skip lines that are the same as the product name (case-insensitive)
-      if (trimmed.toLowerCase() === cleanedNameOnly.toLowerCase()) return false;
-      // Skip lines that start with the product name
-      if (cleanedNameOnly && trimmed.toLowerCase().startsWith(cleanedNameOnly.toLowerCase())) {
-        // Only skip if the remaining part is short (e.g. just punctuation or code)
-        const remaining = trimmed.substring(cleanedNameOnly.length).trim();
-        if (remaining.length < 5) return false;
+    let cleanedNameOnly = stripProductCode(nameOnly);
+    if (sku && cleanedNameOnly) {
+      const norm = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normSku = norm(sku);
+      const normName = norm(cleanedNameOnly);
+      if (normName === normSku || normSku.includes(normName) || normName.includes(normSku)) {
+        cleanedNameOnly = '';
       }
-      return true;
-    });
-    const cleanedFullText = detailLines.join('\n');
+    }
+
+    const formatDisplayDescription = (rawText = '', skuVal = '') => {
+      if (!rawText) return '';
+      const cleanSku = String(skuVal || '').trim();
+      const norm = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normSku = norm(cleanSku);
+      const linesList = String(rawText).split('\n');
+      const cleanLines = [];
+
+      for (let line of linesList) {
+        let trimmed = line.trim();
+        if (!trimmed) continue;
+        if (norm(trimmed) === normSku) continue;
+
+        trimmed = trimmed.replace(/mrp\s*(?:rs\.?|rs|INR|₹)?\s*[\d,\s`\/\-]*/gi, '');
+        trimmed = trimmed.replace(/(?:rs\.?|rs|INR|₹)\s*[\d,\s`\/\-]*/gi, '');
+        trimmed = trimmed.replace(/price\s*[\d,\s`\/\-]*/gi, '');
+
+        if (cleanSku) {
+          const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const skuRegex = new RegExp(escapeRegExp(cleanSku), 'gi');
+          trimmed = trimmed.replace(skuRegex, '');
+        }
+
+        trimmed = trimmed.replace(/\bK-\d+[A-Z0-9\-]*\b/gi, '');
+        trimmed = trimmed.replace(/\b\d{4,5}[A-Z]{0,2}\b/gi, '');
+
+        trimmed = trimmed.replace(/[\s\-\,\.\(\[\)\]\+\/]+$/, '');
+        trimmed = trimmed.replace(/^[\s\-\,\.\(\[\)\]\+\/]+/, '');
+        trimmed = trimmed.replace(/\s+/g, ' ').trim();
+
+        if (trimmed.length < 3) continue;
+        if (!cleanLines.includes(trimmed)) {
+          cleanLines.push(trimmed);
+        }
+      }
+      return cleanLines.join('\n');
+    };
+
+    const cleanedFullText = formatDisplayDescription(fullText, sku);
 
     // Price extraction logic
     let finalPrice = product.price || '';
@@ -350,7 +380,7 @@ export default function InlineSearch({ onAdd, disabled = false }) {
       })(),
       room: '',
       rawText: cleanedFullText,
-      sku: sanitizeDisplayText(product.sku || s.text || ''),
+      sku: sku,
       size: sanitizeDisplayText(product.size || ''),
     };
 

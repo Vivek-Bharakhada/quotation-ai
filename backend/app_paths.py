@@ -17,6 +17,15 @@ def _candidate_data_dirs():
 
 
 def resolve_data_dir(is_frozen: bool, module_dir: str) -> str:
+    # On Render cloud hosting, use the mounted persistent disk path
+    if os.getenv("RENDER") == "true":
+        persistent_path = "/opt/render/project/src/backend/data"
+        os.makedirs(os.path.join(persistent_path, "static", "images"), exist_ok=True)
+        os.makedirs(os.path.join(persistent_path, "static", "quotes"), exist_ok=True)
+        os.makedirs(os.path.join(persistent_path, "uploads"), exist_ok=True)
+        os.makedirs(os.path.join(persistent_path, "quotes_history"), exist_ok=True)
+        return persistent_path
+
     if not is_frozen:
         return module_dir
 
