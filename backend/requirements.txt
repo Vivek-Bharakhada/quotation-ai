@@ -9,3 +9,4 @@ httpx
 aiofiles
 Pillow
 pytesseract==0.3.13
+pymongo[srv]
