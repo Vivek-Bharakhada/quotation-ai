@@ -882,19 +882,21 @@ def delete_quote(id: str):
 def search_item(q: str, brand: str = None, smart: bool = False, exact: bool = False):
     # Handle "all" brand from frontend if it slips through
     if brand == "all": brand = None
-    
-    print(f"DEBUG: Search request: q='{q}', brand='{brand}', smart={smart}, exact={exact}")
     if exact:
         results = search_engine.search_exact(q, smart=smart, brand=brand)
     else:
         results = search_engine.search(q, smart=smart, brand=brand)
-    print(f"DEBUG: Found {len(results)} results")
     return {"results": results}
 
 @app.get("/search-suggestions")
 def search_suggestions(q: str, brand: str = None):
+    from fastapi.responses import JSONResponse
     if brand == "all": brand = None
-    return {"suggestions": search_engine.get_suggestions(q, brand=brand)}
+    suggestions = search_engine.get_suggestions(q, brand=brand)
+    return JSONResponse(
+        content={"suggestions": suggestions},
+        headers={"Cache-Control": "max-age=30, stale-while-revalidate=60"},
+    )
 
 
 @app.post("/catalog/add")

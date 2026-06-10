@@ -79,6 +79,8 @@ catalog_summary_cache = None # Saved dashboard index
 item_code_meta_cache = {}
 _index_cache_signature = None
 _image_path_cache = None
+_suggestion_cache = {}   # (query_lower, brand_lower) -> suggestion list
+_SUGGESTION_CACHE_MAX = 200  # max entries to avoid unbounded memory
 CACHE_SCHEMA_VERSION = 2
 HARD_PLACEHOLDER_CODES = {
     "K-24740IN-7", "K-24740IN-K4", "K-17663IN-0", "K-82958",
@@ -761,13 +763,14 @@ def _rebuild_faiss_background():
         print(f"FAISS rebuild failed: {e}")
 
 def reset_index():
-    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache
+    global stored_items, keyword_index, vector_index, search_cache, catalog_summary_cache, item_code_meta_cache, _suggestion_cache
     stored_items   = []
     keyword_index  = {}
     vector_index   = None
     search_cache   = {}
     catalog_summary_cache = None
     item_code_meta_cache = {}
+    _suggestion_cache = {}  # Clear suggestion cache on index reset
     if os.path.exists(INDEX_FILE):
         try:
             os.remove(INDEX_FILE)
@@ -1753,18 +1756,26 @@ def _merge_suggestion_payloads(*payload_groups, limit: int = 50):
 
 
 def get_suggestions(query: str, limit: int = 50, brand: str = None):
-    print(f"DEBUG: get_suggestions('{query}') started")
+    global _suggestion_cache
     if not query or len(query.strip()) < 2:
         return []
 
     # Start model loading in background if it's the first search
     ensure_model_loaded()
 
-    print("DEBUG: calling load_index()")
-    load_index()
-    print(f"DEBUG: load_index() finished, items count: {len(stored_items) if stored_items else 0}")
+    # Only call load_index() when the in-memory index is empty (e.g. cold start).
+    # Skipping it on every keystroke eliminates the expensive MongoDB round-trip
+    # that was the primary cause of slow suggestions on the live site.
+    if not stored_items:
+        load_index()
     if not stored_items:
         return []
+
+    q_raw = query.strip()
+    brand_lower_ck = (brand or "").strip().lower()
+    cache_key = (q_raw.lower(), brand_lower_ck)
+    if cache_key in _suggestion_cache:
+        return _suggestion_cache[cache_key]
 
     q = query.strip().lower()
     q_compact = _compact_alnum(q)
@@ -1975,5 +1986,15 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
         })
 
     # Prioritize: 1. Exact Name/Code matches, 2. Code family matches, 3. Ranked keyword matches, 4. Seeded results
-    return _merge_suggestion_payloads(exact_payload, exact_first if 'exact_first' in locals() else [], scored_payload, seeded_payload, limit=limit)
+    result = _merge_suggestion_payloads(exact_payload, exact_first if 'exact_first' in locals() else [], scored_payload, seeded_payload, limit=limit)
+
+    # Store in cache; evict oldest entry when over capacity
+    if len(_suggestion_cache) >= _SUGGESTION_CACHE_MAX:
+        try:
+            oldest = next(iter(_suggestion_cache))
+            del _suggestion_cache[oldest]
+        except StopIteration:
+            pass
+    _suggestion_cache[cache_key] = result
+    return result
 
