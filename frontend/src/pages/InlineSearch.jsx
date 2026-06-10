@@ -138,13 +138,16 @@ function resolveSuggestionImage(product = {}, suggestion = {}) {
   const productImage = (product.images && product.images[0]) || '';
   const suggestionImage = suggestion.image || '';
 
-  const isPlaceholder = (value) =>
-    String(value || '').toLowerCase().includes('image_not_found') ||
-    String(value || '').toLowerCase().includes('image not found');
+  const isPlaceholderOrPageExtracted = (value) => {
+    const val = String(value || '').toLowerCase();
+    if (val.includes('image_not_found') || val.includes('image not found')) return true;
+    if ((val.includes('_p') && val.includes('_i')) || val.includes('page')) return true;
+    return false;
+  };
 
-  // Only return a non-placeholder image — never fall back to brand cover
-  if (productImage && !isPlaceholder(productImage)) return productImage;
-  if (suggestionImage && !isPlaceholder(suggestionImage)) return suggestionImage;
+  // Only return a non-placeholder, non-page-extracted image
+  if (productImage && !isPlaceholderOrPageExtracted(productImage)) return productImage;
+  if (suggestionImage && !isPlaceholderOrPageExtracted(suggestionImage)) return suggestionImage;
   return ''; // No real image → frontend will show "No Image" box
 }
 

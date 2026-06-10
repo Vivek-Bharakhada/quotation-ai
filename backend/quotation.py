@@ -85,55 +85,76 @@ def _find_image_by_basename(root_dir, filename):
 
 def _resolve_item_image(base_dir, item):
     img_p = str(item.get("image") or "").strip()
-    if not img_p:
-        return ""
+    
+    # Check if the image is a placeholder, page-extracted, or empty
+    import re
+    is_placeholder_or_pe = (
+        not img_p or
+        "image_not_found" in img_p.lower() or
+        "image not found" in img_p.lower() or
+        bool(re.search(r'_p\d+_i\d+|Page', img_p, re.IGNORECASE))
+    )
 
-    is_frozen = getattr(sys, "frozen", False)
-    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else base_dir
-    data_dir = resolve_data_dir(is_frozen, exe_dir)
+    if not is_placeholder_or_pe:
+        is_frozen = getattr(sys, "frozen", False)
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if is_frozen else base_dir
+        data_dir = resolve_data_dir(is_frozen, exe_dir)
 
-    candidate_paths = []
-    if img_p.startswith("/static/images/"):
-        rel = img_p.replace("/static/images/", "", 1)
-        image_roots = [
-            os.path.join(data_dir, "static", "images"),
-            os.path.join(base_dir, "static", "images"),
-            os.path.join(exe_dir, "static", "images"),
-        ]
+        candidate_paths = []
+        if img_p.startswith("/static/images/"):
+            rel = img_p.replace("/static/images/", "", 1)
+            image_roots = [
+                os.path.join(data_dir, "static", "images"),
+                os.path.join(base_dir, "static", "images"),
+                os.path.join(exe_dir, "static", "images"),
+            ]
 
-        for root_dir in image_roots:
-            resolved = _resolve_case_insensitive_path(root_dir, rel)
-            if resolved:
-                candidate_paths.append(resolved)
-
-        if "/" not in rel.replace("\\", "/"):
-            basename_match = os.path.basename(rel)
             for root_dir in image_roots:
-                recursive_match = _find_image_by_basename(root_dir, basename_match)
-                if recursive_match:
-                    candidate_paths.append(recursive_match)
-    elif os.path.isabs(img_p):
-        candidate_paths.append(img_p)
-    elif img_p.startswith("http://") or img_p.startswith("https://"):
-        cache_dir = os.path.join(data_dir, "static", "images", "_quote_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        filename = os.path.basename(img_p.split("?", 1)[0]) or f"quote_image_{int(datetime.now().timestamp())}.jpg"
-        cached_path = os.path.join(cache_dir, filename)
-        if not os.path.exists(cached_path):
-            try:
-                urllib.request.urlretrieve(img_p, cached_path)
-            except Exception:
-                cached_path = ""
-        if cached_path:
-            candidate_paths.append(cached_path)
+                resolved = _resolve_case_insensitive_path(root_dir, rel)
+                if resolved:
+                    candidate_paths.append(resolved)
 
-    for real_p in candidate_paths:
-        if real_p and os.path.exists(real_p):
-            try:
-                return RLImage(real_p, width=58, height=58, kind='bound')
-            except Exception:
-                continue
-    return ""
+            if "/" not in rel.replace("\\", "/"):
+                basename_match = os.path.basename(rel)
+                for root_dir in image_roots:
+                    recursive_match = _find_image_by_basename(root_dir, basename_match)
+                    if recursive_match:
+                        candidate_paths.append(recursive_match)
+        elif os.path.isabs(img_p):
+            candidate_paths.append(img_p)
+        elif img_p.startswith("http://") or img_p.startswith("https://"):
+            cache_dir = os.path.join(data_dir, "static", "images", "_quote_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            filename = os.path.basename(img_p.split("?", 1)[0]) or f"quote_image_{int(datetime.now().timestamp())}.jpg"
+            cached_path = os.path.join(cache_dir, filename)
+            if not os.path.exists(cached_path):
+                try:
+                    urllib.request.urlretrieve(img_p, cached_path)
+                except Exception:
+                    cached_path = ""
+            if cached_path:
+                candidate_paths.append(cached_path)
+
+        for real_p in candidate_paths:
+            if real_p and os.path.exists(real_p):
+                try:
+                    if os.path.getsize(real_p) > 500:
+                        return RLImage(real_p, width=58, height=58, kind='bound')
+                except Exception:
+                    continue
+
+    # Return a stylized "No Image" Paragraph so it is rendered explicitly in the PDF table
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    no_image_style = ParagraphStyle(
+        'NoImageCell',
+        fontName='Helvetica-Bold',
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#64748b"), # professional slate gray
+        alignment=1, # Center
+    )
+    return Paragraph("No Image", no_image_style)
 
 def _build_item_description(item, styles):
     import re

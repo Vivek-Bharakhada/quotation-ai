@@ -59,6 +59,11 @@ const FORCE_IMAGE_BY_CODE = new Map([
 const isPlaceholderImage = (value) =>
   String(value || '').includes('Image_Not_Found') || String(value || '').includes('Image not Found');
 
+const isPageExtractedImage = (value) => {
+  const val = String(value || '').toLowerCase();
+  return (val.includes('_p') && val.includes('_i')) || val.includes('page');
+};
+
 const stripProductCode = (text = '') => {
   let val = String(text || '').trim();
   if (!val) return '';
@@ -100,14 +105,13 @@ const normalizeItemImage = (item = {}) => {
   const primary = item.image || '';
   const secondary = item.raw_item?.images?.[0] || item.image || '';
 
-  if (primary && !isPlaceholderImage(primary)) {
+  if (primary && !isPlaceholderImage(primary) && !isPageExtractedImage(primary)) {
     return primary;
   }
-  if (secondary && !isPlaceholderImage(secondary)) {
+  if (secondary && !isPlaceholderImage(secondary) && !isPageExtractedImage(secondary)) {
     return secondary;
   }
-  const brand = String(item.brand || item.raw_item?.brand || '').trim();
-  return primary || secondary || BRAND_FALLBACK_IMAGES[brand] || null;
+  return null;
 };
 
 const formatDisplayDescription = (rawText = '', sku = '') => {
@@ -1152,7 +1156,7 @@ export default function Quotation({ cart }) {
                   {normalizeItemImage(item) ? (
                     <img src={resolveAssetUrl(normalizeItemImage(item))} alt="thumb" />
                   ) : (
-                    <div className="qt-no-thumb">NO IMG</div>
+                    <div className="qt-no-thumb">No Image</div>
                   )}
                 </div>
 

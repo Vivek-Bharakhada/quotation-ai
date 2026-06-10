@@ -81,6 +81,7 @@ catalog_summary_cache = None # Saved dashboard index
 item_code_meta_cache = {}
 _index_cache_signature = None
 _image_path_cache = None
+_resolved_code_to_image_cache = {}
 _suggestion_cache = {}   # (query_lower, brand_lower) -> suggestion list
 _SUGGESTION_CACHE_MAX = 200  # max entries to avoid unbounded memory
 CACHE_SCHEMA_VERSION = 2
@@ -109,7 +110,7 @@ for _root in (PERSISTENT_IMAGES_DIR, STATIC_IMAGES_DIR, os.path.join(BUNDLED_DIR
 
 # Minimum file size (bytes) for a valid product image.
 # Images below this are icons, colour swatches, or small decorative elements from the PDF.
-_MIN_PRODUCT_IMAGE_SIZE = 1500
+_MIN_PRODUCT_IMAGE_SIZE = 1000
 SUPPORTED_BRANDS = {"aquant", "kohler"}
 
 _LEADING_CODE_WITH_VARIANT_RE = re.compile(
@@ -210,6 +211,14 @@ def _resolve_local_image_path(image_path: str) -> str:
             return full
 
     return ""
+
+
+def _is_page_extracted_image(image_path: str) -> bool:
+    """True when the image path clearly points to a PDF-extracted segment instead of a dedicated product photo."""
+    if not image_path:
+        return False
+    basename = os.path.basename(image_path)
+    return bool(re.search(r'_p\d+_i\d+|Page', basename, re.IGNORECASE))
 
 
 def _is_cover_page_image(image_path: str) -> bool:
@@ -415,10 +424,10 @@ def prepare_item_for_display(item):
         if best_image:
             display_item["images"] = [best_image]
         else:
-            # Only keep image paths that actually exist on disk
+            # Only keep image paths that actually exist on disk and are not page-extracted
             verified = [
                 img for img in (display_item.get("images") or [])
-                if img and _resolve_local_image_path(img)
+                if img and _resolve_local_image_path(img) and not _is_page_extracted_image(img)
             ]
             display_item["images"] = verified
 
@@ -589,10 +598,15 @@ def _sanitize_item_images(items):
 
 
 def _normalize_item_images(items):
-    for item in items or []:
-        best_image = _best_item_image(item)
-        if best_image:
-            item["images"] = [best_image]
+    global _resolved_code_to_image_cache
+    _resolved_code_to_image_cache.clear()
+    
+    # Run 3 passes to allow image resolution to propagate to variant/sibling codes
+    for pass_num in range(3):
+        for item in items or []:
+            best_image = _best_item_image(item)
+            if best_image:
+                item["images"] = [best_image]
 
 def save_index():
     global stored_items, keyword_index
@@ -889,32 +903,70 @@ def _pick_best_image_match(item, matches):
         brand_hint = _image_brand_hint(path)
         brand_score = 10 if item_brand and brand_hint == item_brand else 1 if brand_hint else 0
         cover_penalty = -5 if _is_cover_page_image(path) else 0
-        # Prefer brand-specific subfolders over root static folder
+        
+        # Prioritize files in the brand's own subfolder (Kohler/ or Aquant/)
+        in_brand_folder = 0
+        if item_brand:
+            brand_folder_part = f"/{item_brand.lower()}/"
+            if brand_folder_part in normalized:
+                in_brand_folder = 20
+                
         folder_boost = 5 if "/" in normalized and not normalized.startswith("manual/") else 0
         manual_penalty = -1 if "/manual/" in normalized else 0
         depth_penalty = -normalized.count("/")
-        return (brand_score, folder_boost, cover_penalty, manual_penalty, depth_penalty)
+        return (in_brand_folder, brand_score, folder_boost, cover_penalty, manual_penalty, depth_penalty)
 
     return max(matches, key=sort_key)
 
 
 def _best_item_image(item):
     """Prefer a verified image path from disk or one of the already assigned ones."""
-    
-    # 1. Collect all candidates: both existing and from disk cache
-    candidates = [img_path for img_path in (item.get("images") or []) if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE]
+    global _resolved_code_to_image_cache
     
     code_meta = _get_item_code_metadata(item)
+    base_code = code_meta.get("base_code", "")
+    full_code = code_meta.get("full_code", "")
+    
+    # 1. Check resolved cache first for speed and cross-variant consistency
+    for code in [full_code, base_code]:
+        if code and code in _resolved_code_to_image_cache:
+            return _resolved_code_to_image_cache[code]
+
+    # Collect all candidate files
+    candidates = []
+    for img_path in (item.get("images") or []):
+        if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE:
+            if _is_page_extracted_image(img_path):
+                continue
+            candidates.append(img_path)
+            
     candidate_codes = []
     for key in ("full_code", "search_code", "base_code"):
         value = str(item.get(key, "") or code_meta.get(key, "")).strip()
         if value:
             candidate_codes.append(value)
+            
+    name = item.get("name", "")
+    text = item.get("text", "")
+    
+    parentheses_candidates = []
+    for source in [name, text] + candidate_codes:
+        if source:
+            found = re.findall(r'\(([^)]+)\)', str(source))
+            for f in found:
+                parentheses_candidates.append(f.strip())
+
+    candidate_codes = [c for c in candidate_codes if c]
+    image_cache = _build_image_path_cache()
 
     # Hard-coded placeholder handling
     for code in candidate_codes:
         if code in HARD_PLACEHOLDER_CODES:
-            return None
+            compact = _compact_alnum(code)
+            if compact and compact in image_cache:
+                pass
+            else:
+                return None
 
     # Check for forced PDF images
     for code in candidate_codes:
@@ -923,8 +975,7 @@ def _best_item_image(item):
             if _image_file_size(forced) >= _MIN_PRODUCT_IMAGE_SIZE:
                 candidates.append(forced)
 
-    # 2. Add candidates from disk cache (verified images)
-    image_cache = _build_image_path_cache()
+    # Add candidates from disk cache via exact match
     for code in candidate_codes:
         compact_code = _compact_alnum(code)
         if not compact_code:
@@ -932,12 +983,102 @@ def _best_item_image(item):
         matches = image_cache.get(compact_code)
         if matches:
             for m in matches:
+                if _is_page_extracted_image(m):
+                    continue
                 if m not in candidates and _image_file_size(m) >= _MIN_PRODUCT_IMAGE_SIZE:
                     candidates.append(m)
 
-    # 3. Pick the best one from the unified pool
     if candidates:
-        return _pick_best_image_match(item, candidates)
+        res = _pick_best_image_match(item, candidates)
+        if res:
+            for code in [full_code, base_code]:
+                if code:
+                    _resolved_code_to_image_cache[code] = res
+            return res
+
+    # 2. Extract lookup keys: base_code, full_code, other K-codes found in descriptions
+    ordered_keys = []
+    if full_code:
+        ordered_keys.append(_compact_alnum(full_code))
+    if base_code:
+        ordered_keys.append(_compact_alnum(base_code))
+        
+    # Extract any K-XXXXXX codes from name and text that are different from the base code
+    all_k_codes = re.findall(r'K-\d{4,}\w*[-#\w]*', name + " " + text)
+    for kc in all_k_codes:
+        kc_clean = kc.strip()
+        kc_meta = _get_item_code_metadata({"search_code": kc_clean, "base_code": kc_clean})
+        kc_base = kc_meta.get("base_code", "")
+        if kc_base and kc_base.lower() != base_code.lower():
+            ordered_keys.append(_compact_alnum(kc_clean))
+            ordered_keys.append(_compact_alnum(kc_base))
+            
+    # Include parentheses candidates
+    for pc in parentheses_candidates:
+        ordered_keys.append(_compact_alnum(pc))
+        
+    # Sibling/Variant Pruning
+    for key in list(ordered_keys):
+        if "-" in key:
+            parts = key.split("-")
+            if len(parts) > 1:
+                ordered_keys.append(_compact_alnum(parts[0]))
+                
+    # Extract digit strings (4+ digits)
+    digit_fallback_keys = []
+    for k in ordered_keys:
+        m_digits = re.findall(r'\d{4,}', k)
+        for d in m_digits:
+            digit_fallback_keys.append(d)
+            if len(d) > 4:
+                digit_fallback_keys.append(d[:4])
+                
+    # Deduplicate ordered_keys preserving order
+    seen = set()
+    unique_keys = []
+    for k in ordered_keys:
+        if k and k not in seen:
+            seen.add(k)
+            unique_keys.append(k)
+
+    res_img = None
+
+    # Exact & Prefix match on unique_keys
+    for k in unique_keys:
+        valid_matches = []
+        for cache_key, paths in image_cache.items():
+            if cache_key.startswith(k) or k in cache_key:
+                for p in paths:
+                    if _is_page_extracted_image(p):
+                        continue
+                    if _image_file_size(p) >= _MIN_PRODUCT_IMAGE_SIZE:
+                        valid_matches.append(p)
+        if valid_matches:
+            res_img = _pick_best_image_match(item, valid_matches)
+            break
+
+    # Digits Match on 4+ digit prefixes
+    if not res_img:
+        for d in digit_fallback_keys:
+            valid_matches = []
+            for cache_key, paths in image_cache.items():
+                if d in cache_key:
+                    for p in paths:
+                        if _is_page_extracted_image(p):
+                            continue
+                        if _image_file_size(p) >= _MIN_PRODUCT_IMAGE_SIZE:
+                            valid_matches.append(p)
+            if valid_matches:
+                res_img = _pick_best_image_match(item, valid_matches)
+                break
+
+    if res_img:
+        for code in [full_code, base_code]:
+            if code:
+                _resolved_code_to_image_cache[code] = res_img
+        return res_img
+
+    return None
 
     return None
 
