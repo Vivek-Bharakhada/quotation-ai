@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
+import bisect
 import copy
 import json
 import os
@@ -73,6 +74,7 @@ except Exception as e:
 # ---- Global State ----
 stored_items = []
 keyword_index = {}   # word -> [item_indices]
+_keyword_keys_sorted = []  # sorted list of keyword_index keys for O(log n) prefix lookup
 vector_index  = None # FAISS index
 search_cache  = {}   # query -> results
 catalog_summary_cache = None # Saved dashboard index
@@ -730,6 +732,10 @@ def load_index(force: bool = False):
             # Reset caches
             search_cache = {}
             catalog_summary_cache = None
+            _suggestion_cache.clear()
+
+            # Build sorted keyword key list for fast bisect prefix lookup
+            _keyword_keys_sorted[:] = sorted(keyword_index.keys())
 
             # Rebuild FAISS in background to avoid blocking API
             if AI_AVAILABLE and FAISS_AVAILABLE and stored_items:
@@ -771,6 +777,7 @@ def reset_index():
     catalog_summary_cache = None
     item_code_meta_cache = {}
     _suggestion_cache = {}  # Clear suggestion cache on index reset
+    _keyword_keys_sorted.clear()
     if os.path.exists(INDEX_FILE):
         try:
             os.remove(INDEX_FILE)
@@ -1198,6 +1205,9 @@ def add_to_index(_unused_embeddings, items):
             print(f"Embedding error: {e}")
 
     save_index()
+    # Rebuild sorted key list for fast bisect prefix search in get_suggestions
+    _keyword_keys_sorted[:] = sorted(keyword_index.keys())
+    _suggestion_cache.clear()
 
 
 
@@ -1207,8 +1217,11 @@ def search(query: str, smart: bool = False, brand: str = None):
     query = query.strip()
     if not query:
         return []
-        
-    load_index()
+    
+    # Only reload when the index is empty (cold start).
+    # This avoids an expensive MongoDB round-trip on every keystroke.
+    if not stored_items:
+        load_index()
     if not stored_items:
         return []
 
@@ -1852,18 +1865,30 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     if len(q_compact) > 3:
         tokens_to_check.add(q_compact[:4])
     
-    # Fast retrieval using keyword index
+    # Fast retrieval using sorted keyword list + bisect for O(log n) prefix lookup
     potential_indices = set()
     for w in tokens_to_check:
-        if not w or len(w) < 2: continue
-        # Normalize search token (remove dash for code prefix checks)
+        if not w or len(w) < 2:
+            continue
         wn = _normalize(w, strip_in=True)
-        # Check for prefix matches in our keyword index
-        for key in keyword_index:
-            if key.startswith(wn) or (len(wn) >= 3 and wn in key):
+        if not wn:
+            continue
+        # Direct hit first
+        if wn in keyword_index:
+            potential_indices.update(keyword_index[wn])
+        # Bisect-based prefix scan (much faster than iterating all keys)
+        if _keyword_keys_sorted:
+            pos = bisect.bisect_left(_keyword_keys_sorted, wn)
+            scanned = 0
+            while pos < len(_keyword_keys_sorted) and scanned < 300:
+                key = _keyword_keys_sorted[pos]
+                if not key.startswith(wn):
+                    break
                 potential_indices.update(keyword_index[key])
-            if len(potential_indices) > 600: break
-        if len(potential_indices) > 600: break
+                pos += 1
+                scanned += 1
+        if len(potential_indices) > 600:
+            break
 
     suggestions = []
     seen = set()
