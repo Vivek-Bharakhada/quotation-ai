@@ -947,10 +947,6 @@ def _best_item_image(item):
                 continue
             candidates.append(img_path)
             
-    # If we have valid candidates, we will evaluate them below BEFORE falling back to base_code
-    if not candidates and base_code and base_code in _resolved_code_to_image_cache:
-        return _resolved_code_to_image_cache[base_code]
-            
     candidate_codes = []
     for key in ("full_code", "search_code", "base_code"):
         value = str(item.get(key, "") or code_meta.get(key, "")).strip()
@@ -1002,9 +998,8 @@ def _best_item_image(item):
     if candidates:
         res = _pick_best_image_match(item, candidates)
         if res:
-            for code in [full_code, base_code]:
-                if code:
-                    _resolved_code_to_image_cache[code] = res
+            if full_code:
+                _resolved_code_to_image_cache[full_code] = res
             return res
 
     # 2. Extract lookup keys: base_code, full_code, other K-codes found in descriptions
@@ -1084,10 +1079,12 @@ def _best_item_image(item):
                 break
 
     if res_img:
-        for code in [full_code, base_code]:
-            if code:
-                _resolved_code_to_image_cache[code] = res_img
+        if full_code:
+            _resolved_code_to_image_cache[full_code] = res_img
         return res_img
+
+    if base_code and base_code in _resolved_code_to_image_cache:
+        return _resolved_code_to_image_cache[base_code]
 
     return None
 
@@ -2036,7 +2033,8 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
                 key = _keyword_keys_sorted[pos]
                 if not key.startswith(wn):
                     break
-                potential_indices.update(keyword_index[key])
+                if key in keyword_index:
+                    potential_indices.update(keyword_index[key])
                 pos += 1
                 scanned += 1
         if len(potential_indices) > 600:
