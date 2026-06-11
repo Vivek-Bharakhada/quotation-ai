@@ -657,8 +657,16 @@ def root():
 
 @app.get("/refresh")
 async def refresh_catalogs():
-    threading.Thread(target=index_local_catalogs, args=(True,), daemon=True).start()
-    return {"message": "Indexing started in background. Results will appear shortly."}
+    import search_engine
+    search_engine.load_index(force=True)
+    search_engine._suggestion_cache.clear()
+    search_engine.item_code_meta_cache.clear()
+    return {"message": "Index reloaded from disk successfully."}
+
+@app.get("/debug")
+def debug_paths():
+    import search_engine
+    return {"bundled": search_engine.INDEX_FILE_BUNDLED, "persistent": search_engine.INDEX_FILE_PERSISTENT, "items": len(search_engine.stored_items)}
 
 @app.get("/status")
 def get_status():
@@ -891,12 +899,19 @@ def search_item(q: str, brand: str = None, smart: bool = False, exact: bool = Fa
 @app.get("/search-suggestions")
 def search_suggestions(q: str, brand: str = None):
     from fastapi.responses import JSONResponse
-    if brand == "all": brand = None
-    suggestions = search_engine.get_suggestions(q, brand=brand)
-    return JSONResponse(
-        content={"suggestions": suggestions},
-        headers={"Cache-Control": "max-age=30, stale-while-revalidate=60"},
-    )
+    import traceback
+    try:
+        if brand == "all": brand = None
+        suggestions = search_engine.get_suggestions(q, brand=brand)
+        return JSONResponse(
+            content={"suggestions": suggestions},
+            headers={"Cache-Control": "max-age=30, stale-while-revalidate=60"},
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "traceback": traceback.format_exc()}
+        )
 
 
 @app.post("/catalog/add")

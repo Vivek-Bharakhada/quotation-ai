@@ -98,6 +98,14 @@ FORCE_PDF_IMAGE_CODES = {
 }
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, str(default))).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+REMOTE_INDEX_SYNC_ENABLED = _env_flag("SEARCH_INDEX_REMOTE_SYNC", is_frozen)
+
+
 # INDEX_FILE is now dynamically determined in load_index
 SEARCH_INDEX_OBJECT_PATH = os.getenv("SUPABASE_SEARCH_INDEX_PATH", "search/search_index_v2.json")
 
@@ -927,18 +935,21 @@ def _best_item_image(item):
     base_code = code_meta.get("base_code", "")
     full_code = code_meta.get("full_code", "")
     
-    # 1. Check resolved cache first for speed and cross-variant consistency
-    for code in [full_code, base_code]:
-        if code and code in _resolved_code_to_image_cache:
-            return _resolved_code_to_image_cache[code]
+    # 1. Check resolved cache first for exact variant (full_code)
+    if full_code and full_code in _resolved_code_to_image_cache:
+        return _resolved_code_to_image_cache[full_code]
 
-    # Collect all candidate files
+    # Collect all candidate files from the item itself
     candidates = []
     for img_path in (item.get("images") or []):
         if img_path and _image_file_size(img_path) >= _MIN_PRODUCT_IMAGE_SIZE:
             if _is_page_extracted_image(img_path):
                 continue
             candidates.append(img_path)
+            
+    # If we have valid candidates, we will evaluate them below BEFORE falling back to base_code
+    if not candidates and base_code and base_code in _resolved_code_to_image_cache:
+        return _resolved_code_to_image_cache[base_code]
             
     candidate_codes = []
     for key in ("full_code", "search_code", "base_code"):
@@ -2163,4 +2174,3 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
             pass
     _suggestion_cache[cache_key] = result
     return result
-
