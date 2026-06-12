@@ -739,10 +739,11 @@ def load_index(force: bool = False):
                 except Exception as e:
                     print(f"Warning: Failed to seed MongoDB: {e}")
 
-            if not stored_items:
-                print("Loaded index is empty; treating it as missing so the catalog can rebuild.")
-                return False
+        except Exception as e:
+            print(f"Error loading local index: {e}")
 
+    if stored_items:
+        try:
             item_code_meta_cache = {}
             _enrich_items_for_search(stored_items)
             search_cache.clear()
@@ -765,7 +766,9 @@ def load_index(force: bool = False):
 
             return True
         except Exception as e:
-            print(f"Error loading index: {e}")
+            print(f"Error initializing index data: {e}")
+            return False
+            
     return False
 
 def _rebuild_faiss_background():
