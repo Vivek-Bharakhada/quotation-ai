@@ -1947,25 +1947,39 @@ def get_suggestions(query: str, limit: int = 50, brand: str = None):
     is_all_brand = (not brand_lower) or (brand_lower == "all")
 
     exact_name_items = []
+    
+    global _suggestion_precompute_cache
+    if '_suggestion_precompute_cache' not in globals():
+        _suggestion_precompute_cache = {}
+        
     for item in stored_items:
         if not _is_supported_item(item):
             continue
         if not is_all_brand and _item_brand(item) != brand_lower:
             continue
-        item_name = str(item.get("name") or "").strip().lower()
-        item_text = str(item.get("text") or "").strip().lower()
-        item_code = str(item.get("search_code") or item.get("base_code") or "").strip().lower()
-        item_alias = str(item.get("display_name") or "").strip().lower()
-        if q in {item_name, item_text, item_code, item_alias}:
+            
+        item_id = id(item)
+        if item_id not in _suggestion_precompute_cache:
+            item_name = str(item.get("name") or "").strip().lower()
+            item_text = str(item.get("text") or "").strip().lower()
+            item_code = str(item.get("search_code") or item.get("base_code") or "").strip().lower()
+            item_alias = str(item.get("display_name") or "").strip().lower()
+            
+            _suggestion_precompute_cache[item_id] = {
+                "lower_set": {item_name, item_text, item_code, item_alias},
+                "compact_set": {
+                    _compact_alnum(item_name),
+                    _compact_alnum(item_text),
+                    _compact_alnum(item_code),
+                    _compact_alnum(item_alias)
+                }
+            }
+            
+        pre = _suggestion_precompute_cache[item_id]
+        if q in pre["lower_set"]:
             exact_name_items.append(item)
-        elif q_compact:
-            if q_compact in {
-                _compact_alnum(item_name),
-                _compact_alnum(item_text),
-                _compact_alnum(item_code),
-                _compact_alnum(item_alias),
-            }:
-                exact_name_items.append(item)
+        elif q_compact and q_compact in pre["compact_set"]:
+            exact_name_items.append(item)
 
     exact_payload = []
     if exact_name_items:
