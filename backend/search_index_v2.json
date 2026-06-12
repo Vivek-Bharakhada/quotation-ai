@@ -36742,9 +36742,9 @@
       ],
       "brand": "Kohler",
       "category": "French Gold",
-      "base_code": "EX26349T-9-AF (EX26349T-9-AF)",
-      "variant_code": "",
-      "search_code": "EX26349T-9-AF (EX26349T-9-AF)"
+      "base_code": "EX26349T-9",
+      "variant_code": "AF",
+      "search_code": "EX26349T-9 AF"
     },
     {
       "text": "K-26348IN-9-AF\nK-26348IN-9-AF\nMust order: Trim only, for use with valve (K-26343T-NA)\nMRP ` 137000",
@@ -46362,6 +46362,38 @@
       "base_code": "K-1225108",
       "variant_code": "0",
       "search_code": "K-1225108-0"
+    },
+    {
+      "text": "K-26349T-9-CP - Anthem\u2122 Anthem\u2122\nRecessed thermostatic mechanical 5 outlet trim in polished chrome\nEX26349T-9-CP\nMRP : ` 122400.00/-",
+      "name": "K-26349T-9-CP - Anthem\u2122 Anthem\u2122",
+      "price": "122400.00",
+      "page": 62,
+      "source": "Kohler_PriceBook (June'26)",
+      "images": [
+        "/static/images/Kohler/K-26349T-9 CP.png"
+      ],
+      "brand": "Kohler",
+      "category": "Showering",
+      "base_code": "EX26349T-9",
+      "variant_code": "CP",
+      "search_code": "EX26349T-9 CP",
+      "finish_label": "Chrome Plated"
+    },
+    {
+      "text": "K-26349T-9-RGD - EX26349T-9-RGD\nMRP : ` 171400.00/-",
+      "name": "K-26349T-9-RGD - EX26349T-9-RGD",
+      "price": "171400.00",
+      "page": 130,
+      "source": "Kohler_PriceBook (June'26)",
+      "images": [
+        "/static/images/Kohler/K-26349T-9 CP.png"
+      ],
+      "brand": "Kohler",
+      "category": "Rose Gold",
+      "base_code": "EX26349T-9",
+      "variant_code": "RGD",
+      "search_code": "EX26349T-9 RGD",
+      "finish_label": "Rose Gold"
     }
   ],
   "keyword_index": {
