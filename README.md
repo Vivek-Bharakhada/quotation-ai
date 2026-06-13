@@ -9,7 +9,9 @@ A full-stack Quotation Management System for Shreeji Ceramica built with **FastA
 - 📤 Share via WhatsApp & Gmail with branded messages
 - 📥 Download professional PDF with company logo & branding
 
----
+## Live Demo
+
+https://quotation-ai-mu.vercel.app
 
 ## 🚀 Deploy on Render
 
@@ -77,3 +79,24 @@ quotation-ai/
 ├── render.yaml            # Render deployment config
 └── .gitignore
 ```
+
+## Tech Stack
+
+### Frontend
+- React
+- JavaScript
+- CSS
+
+### Backend
+- Python
+- FastAPI
+
+### Database
+- MongoDB
+
+### Deployment
+- Vercel
+- Render
+
+### AI Integration
+- OpenAI API
